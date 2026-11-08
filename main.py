@@ -1,11 +1,9 @@
 import vk_api
 from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
 import json, random, sqlite3, time
-import threading
 
 # ===== ТОКЕН И НАСТРОЙКИ =====
-TOKEN = "vk1.a.zv9AbD2pmFMuozfpcIr-YKVqbY9a3nJmyg-t94V8hCKy8MfFMY0O448E3qiyY-sH5T0wo7GprJQOluig71mmSAmtTSlqhWSxMMgBwJMWE_uhkDzlLE7CGfpVZ7uAXKhYIJhiKtRA1SFPxO-flLt01cI04G-KYwKOA5VxBPHIEaPQisl3vBxJeolw8DjYV7DV6-B2nrYR1A3cw7n0_amkkZWAd52ux64S3sbAwOpP6es"
-ADMIN_ID = 200005093141
+TOKEN = "vk1.a.sMTCscV9_D9GIW3Fi6VSBUomEXxEtdnjmFQaCz0q7CvEIaEq0nS2dMrwT1UzCTXipLhcxQDNg7lgFElqHib4CdOn9nNzFpLHJYeFOm2F5ujs_U7gG4IZ1HcPnBcEU-uQ-ZCuEffA5vZ4Wq3VwEdwqyyELSzj4Rf4EEnk1a5pU9inW31I1lU13DwGb3yb-vCrsJejtVQlkOFhOgzTkNdFYGhbC4runS78kFiGnqNntLw"
 GROUP_ID = 242296265 
 
 vk_session = vk_api.VkApi(token=TOKEN)
@@ -96,7 +94,7 @@ def get_bet_kb():
     }, ensure_ascii=False)
 
 # ===== ЗАПУСК =====
-print("КАЗИНО БОТ ЗАПУЩЕН С НОВЫМ ТОКЕНОМ!")
+print("КАЗИНО БОТ ЗАПУЩЕН!")
 
 while True:
     try:
