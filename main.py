@@ -4,7 +4,7 @@ import json, random, sqlite3, time
 import threading
 
 # ===== ТОКЕН И НАСТРОЙКИ =====
-TOKEN = "vk1.a.GPEBmYPG-udUnhJYcT_4Zo-jEKzU7VFUYVzRDNwr1wVwo_fsBabigDoS-2BW9bvMbjdYBmf-QH6dwf-ZL4dMYkKMEEiviqU5GPmM5kaG4Xt535Hb1ApvImzJkk_cq-Q7ZxOQYVPbnULj0Fg6U0yDNSPgLwANkGKX348kTlENY6s99NOBeUO-e486DAX-0XtbAa3tmQdMYjF2GLxluGvHrhFHhvr5YCuDXfYxTgw5cYo"
+TOKEN = "_-vPq0qewArGSZN249y6Cw8E4IkoVUYF0OkHNIzaz1Ze6Z7ogJbt3ScvQfe7Ce1rYPwVgeveCgQ-lbnInmzUX1IIJC_4_i4lwUhSYcCbN3bY-4NkFAZuGa-SNvfvs1OV3elJ5YiPgXIvoMV5sjtH5TqrxB0003RMnN1n3moT3m4TTBchCdxBFgb6pQTy4tx3exyuZNFAZndxvy5AS8lSLAJudVraOktxHjCgRkJQw58"
 ADMIN_ID = 200005093141
 GROUP_ID = 242296265 
 
@@ -13,8 +13,8 @@ longpoll = VkBotLongPoll(vk_session, GROUP_ID)
 vk = vk_session.get_api()
 
 # Состояния для ставок
-waiting_for_bet = {} # user_id: {"game": "color" / "parity", "bet": 100, "choice": "red" / "even"}
-waiting_for_amount = {} # user_id: "color" / "parity"
+waiting_for_bet = {} 
+waiting_for_amount = {} 
 
 # --- БАЗА ДАННЫХ ---
 def init_db():
@@ -96,7 +96,7 @@ def get_bet_kb():
     }, ensure_ascii=False)
 
 # ===== ЗАПУСК =====
-print("КАЗИНО БОТ ЗАПУЩЕН!")
+print("КАЗИНО БОТ ЗАПУЩЕН С НОВЫМ ТОКЕНОМ!")
 
 while True:
     try:
@@ -116,7 +116,7 @@ while True:
                 # === БЛОК 1: ОЖИДАНИЕ СУММЫ СТАВКИ ===
                 if user_id in waiting_for_amount:
                     game_type = waiting_for_amount[user_id]
-                    del waiting_for_amount[user_id] # Сбрасываем
+                    del waiting_for_amount[user_id] 
                     
                     bet_amount = 0
                     if text == "всё!":
@@ -139,7 +139,6 @@ while True:
                     
                     if game_type == "color":
                         msg_text = f"💰 Ставка: {bet_amount} монет.\n\nВыбирай цвет:"
-                        # Инлайн-кнопки для цвета
                         kb = json.dumps({"inline": True, "buttons": [
                             [{"action": {"type": "callback", "label": "🔴 Красное (x2)", "payload": json.dumps({"cmd": "spin", "choice": "red"})}, "color": "negative"},
                              {"action": {"type": "callback", "label": "⚫ Черное (x2)", "payload": json.dumps({"cmd": "spin", "choice": "black"})}, "color": "secondary"}]
@@ -168,13 +167,11 @@ while True:
                         bet_data = waiting_for_bet[user_id]
                         bet_amount = bet_data["bet"]
                         game_type = bet_data["type"]
-                        del waiting_for_bet[user_id] # Очищаем после игры
+                        del waiting_for_bet[user_id] 
                         
-                        # Имитация вращения
                         vk.messages.sendMessageEventAnswer(event_id=event.object.event_id, user_id=user_id, peer_id=peer_id, event_data=json.dumps({"type": "show_snackbar", "text": "🎲 Крутим рулетку..."}))
                         time.sleep(1)
                         
-                        # Исход (0-36). 0 - Зеро (выигрыш казино)
                         result_num = random.randint(0, 36)
                         is_even = (result_num % 2 == 0) and result_num != 0
                         is_red = result_num in [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36]
