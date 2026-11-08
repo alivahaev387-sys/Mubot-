@@ -4,7 +4,7 @@ import json, random, sqlite3, time
 import threading
 
 # ===== ТОКЕН И НАСТРОЙКИ =====
-TOKEN = "vk1.a._-vPq0qewArGSZN249y6Cw8E4IkoVUYF0OkHNIzaz1Ze6Z7ogJbt3ScvQfe7Ce1rYPwVgeveCgQ-lbnInmzUX1IIJC_4_i4lwUhSYcCbN3bY-4NkFAZuGa-SNvfvs1OV3elJ5YiPgXIvoMV5sjtH5TqrxB0003RMnN1n3moT3m4TTBchCdxBFgb6pQTy4tx3exyuZNFAZndxvy5AS8lSLAJudVraOktxHjCgRkJQw58"
+TOKEN = "vk1.a.bQTUKySA6_mHljGKRtUPM91j5tUZesitw5SN4g6TflJUJNxxSc5K0NY0hOJVasp7qr8ztaMeVGrhZ9qj06G5kSRH103QmJPXiUQrxL5eyC5rN6BMMj6bnOxAkuN3N-2SIUPC6jXfkcPNzbFltGBHIPY-ekGTTyRouxTcsb_AF02JoqI_nBmTtnmW3C-Nu0Oh-hdyyoumpqyWs6dvflY5XP2p_f1j1er0eRo1gvlQsjc"
 ADMIN_ID = 200005093141
 GROUP_ID = 242296265 
 
