@@ -3,7 +3,7 @@ from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
 import json, random, sqlite3, time
 
 # ===== ТОКЕН И НАСТРОЙКИ =====
-TOKEN = "vk1.a.sMTCscV9_D9GIW3Fi6VSBUomEXxEtdnjmFQaCz0q7CvEIaEq0nS2dMrwT1UzCTXipLhcxQDNg7lgFElqHib4CdOn9nNzFpLHJYeFOm2F5ujs_U7gG4IZ1HcPnBcEU-uQ-ZCuEffA5vZ4Wq3VwEdwqyyELSzj4Rf4EEnk1a5pU9inW31I1lU13DwGb3yb-vCrsJejtVQlkOFhOgzTkNdFYGhbC4runS78kFiGnqNntLw"
+TOKEN = "vk1.a.LKc6-WBxGwdLWBFxz6Z2p1N-MzGJD0ha1tK4-v-Qt7ULYWXTw9RS206OMxBnyUIbNyQDCU28mJUE93DIBSPZVFZPh16lcP9nKLbvcWC2tcRll2Ci6jBbnOaRii82nMj5gFd6xIjYHkOuQnruLQdiKYJHj-YBaujDDMw_UuEu5ELEKnUPHiXMEoTgoPlHOuKLbqNVw1t3Fh7SoCNaV_7MbBrgCpJD5wi8at3FIPpnbuQ"
 GROUP_ID = 242296265 
 
 vk_session = vk_api.VkApi(token=TOKEN)
