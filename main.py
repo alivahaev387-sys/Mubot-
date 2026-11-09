@@ -1,13 +1,13 @@
 import random
 import asyncio
 import aiosqlite
-from vkbottle.bot import Bot, Message, MessageEvent
+from vkbottle.bot import Bot, Message
 from vkbottle import Keyboard, KeyboardButtonColor, Text, GroupEventType
 
 # --- НАСТРОЙКИ ---
 TOKEN = "vk1.a.Fgowv-iH2wbOXG7ra56zmUWabQJy2OBRma9n4V3ufueJ_FJrbt5K_t9dOu_OtC-xF1iTWBi8yX5bGOmQ1kbQExof1U4IZKgoO6NVGNg9aaR17ECXar65GK6s-LdkflKto0qhZddvXHeDhxkFeya3z5XN80QnNGB7F676pFOs4xScHkUyvyvodMk5QsFpDHSrJ45m23CVzidcr1reHfrqW5ci9FxMDEhiF3JGG1021qQ"
-ADMIN_ID = 200005093141   # Твой ID (владелец)
-GROUP_ID = 243089386      # ID твоего сообщества
+ADMIN_ID = 200005093141   # Твой ID
+GROUP_ID = 243089386      # ID твоего сообщества (без минуса)
 
 bot = Bot(token=TOKEN)
 DB_NAME = "game_database.db"
@@ -66,19 +66,21 @@ def get_main_keyboard():
 
 # --- ОБРАБОТЧИКИ ---
 
-# 1. Приветствие в ЛС
-@bot.on.message(text=["Начать", "начать", "start"])
+# 1. Приветствие в ЛС (игнорируем регистр)
+@bot.on.message(text=["Начать", "начать", "start"], ignore_case=True)
 async def start_handler(message: Message):
+    # Проверяем, что это ЛС (peer_id равен from_id)
+    if message.peer_id != message.from_id:
+        return
     await get_user(message.from_id)
     await message.answer(
         "👋 Привет! Я игровой бот.\nВыбирай действие на клавиатуре ниже 👇",
         keyboard=get_main_keyboard()
     )
 
-# 2. Работа (Кнопка в ЛС)
+# 2. Работа
 @bot.on.message(text=["💼 Работа"])
 async def work_handler(message: Message):
-    user = await get_user(message.from_id)
     reward = random.randint(500, 1500)
     await update_balance(message.from_id, reward)
     await message.answer(f"💼 Ты поработал и заработал **{reward}$**!\n💰 Твой баланс: {await get_balance(message.from_id)}$")
@@ -89,7 +91,7 @@ async def profile_handler(message: Message):
     balance = await get_balance(message.from_id)
     await message.answer(f"👤 Твой профиль:\n💰 Баланс: {balance}$\n🆔 ID: {message.from_id}")
 
-# 4. Биткоин/Топ
+# 4. Топ
 @bot.on.message(text=["🏆 Топ"])
 async def top_handler(message: Message):
     async with aiosqlite.connect(DB_NAME) as db:
@@ -101,8 +103,8 @@ async def top_handler(message: Message):
         text += f"{i}. ID {uid} — {bal}$\n"
     await message.answer(text)
 
-# 5. Команда /help в беседе
-@bot.on.message(text="/help")
+# 5. Команда /help
+@bot.on.message(text="/help", ignore_case=True)
 async def help_handler(message: Message):
     help_text = (
         "📚 **Доступные команды:**\n"
@@ -113,14 +115,14 @@ async def help_handler(message: Message):
     )
     await message.answer(help_text, reply_to=message.id)
 
-# 6. Баланс в беседе
-@bot.on.message(text="/balance")
+# 6. Баланс
+@bot.on.message(text="/balance", ignore_case=True)
 async def balance_handler(message: Message):
     bal = await get_balance(message.from_id)
     await message.answer(f"💰 Ваш баланс: {bal}$", reply_to=message.id)
 
-# 7. Активация промокода ИГРОКОМ
-@bot.on.message(text="/promo <code>")
+# 7. Активация промокода
+@bot.on.message(text="/promo <code>", ignore_case=True)
 async def activate_promo_handler(message: Message, code: str):
     async with aiosqlite.connect(DB_NAME) as db:
         async with db.execute("SELECT reward FROM promocodes WHERE code = ?", (code,)) as cursor:
@@ -135,8 +137,8 @@ async def activate_promo_handler(message: Message, code: str):
             else:
                 await message.reply("❌ Такого промокода не существует или он уже активирован.")
 
-# 8. СОЗДАНИЕ ПРОМОКОДА (Только для Владельца)
-@bot.on.message(text="/промокод <name> <amount:int>")
+# 8. Создание промокода (Владелец)
+@bot.on.message(text="/промокод <name> <amount:int>", ignore_case=True)
 async def create_promo_handler(message: Message, name: str, amount: int):
     if message.from_id != ADMIN_ID:
         return 
@@ -149,11 +151,13 @@ async def create_promo_handler(message: Message, name: str, amount: int):
         except aiosqlite.IntegrityError:
             await message.reply("❌ Такой промокод уже существует.")
 
-# 9. Приветствие при добавлении в беседу
+# 9. Приветствие при добавлении БОТА в беседу
 @bot.on.raw_event(GroupEventType.CHAT_INVITE_USER, dataclass=dict)
 async def on_chat_invite(event_data: dict):
+    # Проверяем, что добавили именно бота (ID группы со знаком минус)
     if event_data['object']['member_id'] == -GROUP_ID:
         kb = Keyboard(inline=True)
+        # Важно: payload должен быть строкой JSON или словарем
         kb.add(Text("Активировать", payload={"cmd": "activate_chat"}), color=KeyboardButtonColor.POSITIVE)
         
         await bot.api.messages.send(
@@ -163,14 +167,14 @@ async def on_chat_invite(event_data: dict):
             random_id=0
         )
 
-# 10. Обработка кнопки "Активировать"
+# 10. Обработка нажатия кнопки "Активировать"
 @bot.on.message(payload={"cmd": "activate_chat"})
 async def activate_chat_handler(message: Message):
     if message.from_id != ADMIN_ID:
         await message.answer("❌ Ошибка! Только владелец бота может активировать его здесь.")
         return
     
-    # Редактируем сообщение, убирая кнопку
+    # Убираем кнопку, редактируя сообщение
     await bot.api.messages.edit(
         peer_id=message.peer_id,
         message="Отлично! У бота теперь есть администратор. Напиши /help, чтобы узнать все команды. ❤️",
@@ -180,7 +184,7 @@ async def activate_chat_handler(message: Message):
 # Запуск
 async def main():
     await init_db()
-    print("Бот запущен на vkbottle!")
+    print("Бот успешно запущен и готов к работе!")
     await bot.run_polling()
 
 if __name__ == "__main__":
