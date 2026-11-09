@@ -1,224 +1,187 @@
-import vk_api
-from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
-import json, random, time
+import random
+import asyncio
+import aiosqlite
+from vkbottle.bot import Bot, Message, MessageEvent
+from vkbottle import Keyboard, KeyboardButtonColor, Text, GroupEventType
 
-# ===== ТОКЕН И НАСТРОЙКИ =====
+# --- НАСТРОЙКИ ---
 TOKEN = "vk1.a.Fgowv-iH2wbOXG7ra56zmUWabQJy2OBRma9n4V3ufueJ_FJrbt5K_t9dOu_OtC-xF1iTWBi8yX5bGOmQ1kbQExof1U4IZKgoO6NVGNg9aaR17ECXar65GK6s-LdkflKto0qhZddvXHeDhxkFeya3z5XN80QnNGB7F676pFOs4xScHkUyvyvodMk5QsFpDHSrJ45m23CVzidcr1reHfrqW5ci9FxMDEhiF3JGG1021qQ"
-GROUP_ID = 243089386
-ADMIN_ID = 200005093141 
+ADMIN_ID = 200005093141   # Твой ID (владелец)
+GROUP_ID = 243089386      # ID твоего сообщества
 
-vk_session = vk_api.VkApi(token=TOKEN)
-longpoll = VkBotLongPoll(vk_session, GROUP_ID)
-vk = vk_session.get_api()
+bot = Bot(token=TOKEN)
+DB_NAME = "game_database.db"
 
-balances = {}
-active_chats = set()
-waiting_for_bet = {}
+# --- БАЗА ДАННЫХ ---
+async def init_db():
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                user_id INTEGER PRIMARY KEY,
+                balance INTEGER DEFAULT 1000,
+                job_cooldown INTEGER DEFAULT 0,
+                last_saper INTEGER DEFAULT 0
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS promocodes (
+                code TEXT PRIMARY KEY,
+                reward INTEGER
+            )
+        """)
+        await db.commit()
 
-def get_balance(user_id):
-    return balances.get(user_id, 1000)
+# --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
+async def get_user(user_id: int):
+    async with aiosqlite.connect(DB_NAME) as db:
+        async with db.execute("SELECT * FROM users WHERE user_id = ?", (user_id,)) as cursor:
+            user = await cursor.fetchone()
+            if not user:
+                await db.execute("INSERT INTO users (user_id, balance) VALUES (?, ?)", (user_id, 1000))
+                await db.commit()
+                return (user_id, 1000, 0, 0)
+            return user
 
-def set_balance(user_id, amount):
-    balances[user_id] = amount
+async def update_balance(user_id: int, amount: int):
+    await get_user(user_id)
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (amount, user_id))
+        await db.commit()
 
-def send_msg(peer_id, message, keyboard=None, reply_to=None):
-    try:
-        params = {
-            'peer_id': peer_id,
-            'message': message,
-            'random_id': random.randint(1, 2**31 - 1)
-        }
-        if keyboard: params['keyboard'] = keyboard
-        if reply_to: params['reply_to'] = reply_to
-        return vk.messages.send(**params)
-    except Exception as e:
-        print(f"Ошибка отправки: {e}")
+async def get_balance(user_id: int):
+    user = await get_user(user_id)
+    return user[1]
 
-def edit_msg(peer_id, cm_id, message):
-    try:
-        vk.messages.edit(peer_id=peer_id, message=message, conversation_message_id=cm_id)
-    except Exception as e:
-        print(f"Ошибка редактирования: {e}")
+# --- КЛАВИАТУРЫ ---
+def get_main_keyboard():
+    kb = Keyboard(one_time=False)
+    kb.add(Text("💼 Работа"), color=KeyboardButtonColor.POSITIVE)
+    kb.add(Text("🎰 Казино"), color=KeyboardButtonColor.PRIMARY)
+    kb.row()
+    kb.add(Text("👤 Профиль"), color=KeyboardButtonColor.SECONDARY)
+    kb.add(Text("🏆 Топ"), color=KeyboardButtonColor.SECONDARY)
+    kb.row()
+    kb.add(Text("🎁 Промокод"), color=KeyboardButtonColor.SECONDARY)
+    return kb
 
-def get_main_kb():
-    return json.dumps({
-        "one_time": False, 
-        "buttons": [
-            [{"action": {"type": "text", "label": "🎰 Казино"}, "color": "positive"},
-             {"action": {"type": "text", "label": "🎲 Рулетка"}, "color": "primary"}],
-            [{"action": {"type": "text", "label": "🚕 Такси"}, "color": "secondary"},
-             {"action": {"type": "text", "label": "🎣 Рыбалка"}, "color": "secondary"},
-             {"action": {"type": "text", "label": "🏹 Охота"}, "color": "secondary"}],
-            [{"action": {"type": "text", "label": "👤 Профиль"}, "color": "secondary"},
-             {"action": {"type": "text", "label": "📖 Помощь"}, "color": "negative"}]
-        ]
-    }, ensure_ascii=False)
+# --- ОБРАБОТЧИКИ ---
 
-def get_activate_kb():
-    return json.dumps({
-        "inline": True,
-        "buttons": [
-            [{"action": {"type": "callback", "label": "🎮 Активировать", "payload": json.dumps({"cmd": "activate"})}, "color": "positive"}]
-        ]
-    }, ensure_ascii=False)
+# 1. Приветствие в ЛС
+@bot.on.message(text=["Начать", "начать", "start"])
+async def start_handler(message: Message):
+    await get_user(message.from_id)
+    await message.answer(
+        "👋 Привет! Я игровой бот.\nВыбирай действие на клавиатуре ниже 👇",
+        keyboard=get_main_keyboard()
+    )
 
-print("БОТ ЗАПУЩЕН (ИГРОВАЯ ВЕРСИЯ)!")
+# 2. Работа (Кнопка в ЛС)
+@bot.on.message(text=["💼 Работа"])
+async def work_handler(message: Message):
+    user = await get_user(message.from_id)
+    reward = random.randint(500, 1500)
+    await update_balance(message.from_id, reward)
+    await message.answer(f"💼 Ты поработал и заработал **{reward}$**!\n💰 Твой баланс: {await get_balance(message.from_id)}$")
 
-while True:
-    try:
-        for event in longpoll.listen():
+# 3. Профиль
+@bot.on.message(text=["👤 Профиль"])
+async def profile_handler(message: Message):
+    balance = await get_balance(message.from_id)
+    await message.answer(f"👤 Твой профиль:\n💰 Баланс: {balance}$\n🆔 ID: {message.from_id}")
+
+# 4. Биткоин/Топ
+@bot.on.message(text=["🏆 Топ"])
+async def top_handler(message: Message):
+    async with aiosqlite.connect(DB_NAME) as db:
+        async with db.execute("SELECT user_id, balance FROM users ORDER BY balance DESC LIMIT 5") as cursor:
+            top_users = await cursor.fetchall()
             
-            # Приглашение в беседу
-            if event.type == VkBotEventType.MESSAGE_NEW and event.object.message.get('action'):
-                action = event.object.message['action']
-                if action.get('type') == 'chat_invite_user' and action.get('member_id') == -GROUP_ID:
-                    peer_id = event.object.message['peer_id']
-                    cm_id = event.object.message.get('conversation_message_id')
-                    send_msg(peer_id, "Привет! Я игровой бот.\nЧтобы включить игры, выдай мне админку и нажми кнопку ниже.", get_activate_kb(), reply_to=cm_id)
-                    continue
+    text = "🏆 **Топ 5 богатейших:**\n\n"
+    for i, (uid, bal) in enumerate(top_users, 1):
+        text += f"{i}. ID {uid} — {bal}$\n"
+    await message.answer(text)
 
-            # Нажатие кнопки активации
-            if event.type == VkBotEventType.MESSAGE_EVENT:
-                payload = event.object.payload
-                peer_id = event.object.peer_id
-                user_id = event.object.user_id
-                event_id = event.object.event_id
-                cm_id = event.object.conversation_message_id
-                
-                if payload.get("cmd") == "activate":
-                    try:
-                        members = vk.messages.getConversationMembers(peer_id=peer_id)['items']
-                        is_admin = False
-                        for m in members:
-                            if m['member_id'] == user_id and m.get('is_admin', False):
-                                is_admin = True
-                                break
-                        
-                        if is_admin:
-                            active_chats.add(peer_id)
-                            vk.messages.sendMessageEventAnswer(event_id=event_id, user_id=user_id, peer_id=peer_id, event_data=json.dumps({"type": "show_snackbar", "text": "✅ Успешно!"}))
-                            edit_msg(peer_id, cm_id, "Отлично! У бота теперь есть администратор. Чтобы пользоваться, напишите /help")
-                        else:
-                            vk.messages.sendMessageEventAnswer(event_id=event_id, user_id=user_id, peer_id=peer_id, event_data=json.dumps({"type": "show_snackbar", "text": "❌ Вы не администратор!"}))
-                    except Exception as e:
-                        print(f"Ошибка проверки: {e}")
-                continue
+# 5. Команда /help в беседе
+@bot.on.message(text="/help")
+async def help_handler(message: Message):
+    help_text = (
+        "📚 **Доступные команды:**\n"
+        "/help — Список команд\n"
+        "/balance — Мой баланс\n"
+        "/promo [код] — Активировать промокод\n\n"
+        "В личных сообщениях бота есть меню с кнопками!"
+    )
+    await message.answer(help_text, reply_to=message.id)
 
-            # Текстовые сообщения
-            if event.type == VkBotEventType.MESSAGE_NEW and event.object.message.get('text'):
-                msg = event.object.message
-                peer_id = msg['peer_id']
-                user_id = msg['from_id'] 
-                cm_id = msg.get('conversation_message_id')
-                
-                text = msg.get('text', '').strip()
-                text_lower = text.lower()
-                parts = text_lower.split()
-                is_ls = (peer_id == user_id)
+# 6. Баланс в беседе
+@bot.on.message(text="/balance")
+async def balance_handler(message: Message):
+    bal = await get_balance(message.from_id)
+    await message.answer(f"💰 Ваш баланс: {bal}$", reply_to=message.id)
 
-                if not is_ls and peer_id not in active_chats:
-                    continue
+# 7. Активация промокода ИГРОКОМ
+@bot.on.message(text="/promo <code>")
+async def activate_promo_handler(message: Message, code: str):
+    async with aiosqlite.connect(DB_NAME) as db:
+        async with db.execute("SELECT reward FROM promocodes WHERE code = ?", (code,)) as cursor:
+            promo = await cursor.fetchone()
+            
+            if promo:
+                reward = promo[0]
+                await update_balance(message.from_id, reward)
+                await db.execute("DELETE FROM promocodes WHERE code = ?", (code,))
+                await db.commit()
+                await message.reply(f"✅ Промокод активирован! Вы получили {reward}$")
+            else:
+                await message.reply("❌ Такого промокода не существует или он уже активирован.")
 
-                balance = get_balance(user_id)
+# 8. СОЗДАНИЕ ПРОМОКОДА (Только для Владельца)
+@bot.on.message(text="/промокод <name> <amount:int>")
+async def create_promo_handler(message: Message, name: str, amount: int):
+    if message.from_id != ADMIN_ID:
+        return 
+        
+    async with aiosqlite.connect(DB_NAME) as db:
+        try:
+            await db.execute("INSERT INTO promocodes (code, reward) VALUES (?, ?)", (name, amount))
+            await db.commit()
+            await message.reply(f"✅ Промокод `{name}` на сумму {amount}$ успешно создан!")
+        except aiosqlite.IntegrityError:
+            await message.reply("❌ Такой промокод уже существует.")
 
-                # === БЕСЕДЫ ===
-                if not is_ls:
-                    if text_lower == "/help":
-                        help_text = ("📖 Команды:\n\n"
-                                     "🔴 /красное [сумма]\n"
-                                     "⚫ /черное [сумма]\n"
-                                     "🟢 /чет [сумма]\n"
-                                     "🔴 /нечет [сумма]\n"
-                                     "🔢 /дрим [1-15] [сумма]\n"
-                                     "🚕 /такси\n"
-                                     "🎣 /рыбалка\n"
-                                     "🏹 /охота\n"
-                                     "👤 /профиль\n"
-                                     "🏆 /топ")
-                        send_msg(peer_id, help_text, reply_to=cm_id)
-                    
-                    elif text_lower.startswith("/красное"):
-                        if len(parts) == 2 and parts[1].isdigit():
-                            bet = int(parts[1])
-                            if bet > balance or bet < 10:
-                                send_msg(peer_id, f"❌ Ошибка: мин. ставка 10, баланс {balance}.", reply_to=cm_id)
-                            else:
-                                res = random.randint(0, 36)
-                                if res in [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36]:
-                                    set_balance(user_id, balance + bet)
-                                    send_msg(peer_id, f"🎉 ПОБЕДА! Выпало {res} 🔴. Ты выиграл {bet}!", reply_to=cm_id)
-                                else:
-                                    set_balance(user_id, balance - bet)
-                                    send_msg(peer_id, f"😔 ПРОИГРЫШ. Выпало {res}. Ты потерял {bet}.", reply_to=cm_id)
-                        else:
-                            send_msg(peer_id, "❌ Напиши: /красное [сумма].", reply_to=cm_id)
-                    
-                    elif text_lower == "/такси":
-                        earned = random.randint(50, 200)
-                        set_balance(user_id, balance + earned)
-                        send_msg(peer_id, f"🚕 Ты заработал на такси {earned} монет!", reply_to=cm_id)
-                    
-                    elif text_lower == "/профиль":
-                        send_msg(peer_id, f"👤 Твой баланс: {balance} монет", reply_to=cm_id)
-                    
-                    elif text_lower == "/топ":
-                        sorted_players = sorted(balances.items(), key=lambda x: x[1], reverse=True)[:5]
-                        top_text = "🏆 Топ 5 богачей:\n\n"
-                        if not sorted_players: top_text += "Пока никого нет."
-                        else:
-                            for i, (u, b) in enumerate(sorted_players, 1):
-                                top_text += f"{i}. [id{u}|Игрок] — {b} монет\n"
-                        send_msg(peer_id, top_text, reply_to=cm_id)
-                    
-                    continue
+# 9. Приветствие при добавлении в беседу
+@bot.on.raw_event(GroupEventType.CHAT_INVITE_USER, dataclass=dict)
+async def on_chat_invite(event_data: dict):
+    if event_data['object']['member_id'] == -GROUP_ID:
+        kb = Keyboard(inline=True)
+        kb.add(Text("Активировать", payload={"cmd": "activate_chat"}), color=KeyboardButtonColor.POSITIVE)
+        
+        await bot.api.messages.send(
+            peer_id=event_data['object']['peer_id'],
+            message="👋 Привет! Я игровой бот. Нажмите кнопку ниже, чтобы активировать меня в этом чате.\n(Активация доступна только владельцу бота).",
+            keyboard=kb.get_json(),
+            random_id=0
+        )
 
-                # === ЛС ===
-                if text_lower in ["начать", "start", "меню"]:
-                    send_msg(peer_id, f"🎰 Твой баланс: {balance} монет.\nВыбирай игру на кнопках ниже 👇", get_main_kb(), reply_to=cm_id)
-                
-                elif text == "🎰 Казино":
-                    waiting_for_bet[user_id] = "casino"
-                    send_msg(peer_id, "Напиши сумму ставки (например: 500):", reply_to=cm_id)
-                elif text == "🎲 Рулетка":
-                    waiting_for_bet[user_id] = "roulette"
-                    send_msg(peer_id, "Напиши сумму ставки (например: 500):", reply_to=cm_id)
-                elif text == "🚕 Такси":
-                    earned = random.randint(50, 200)
-                    set_balance(user_id, balance + earned)
-                    send_msg(peer_id, f"🚕 Ты поработал таксистом и заработал {earned} монет!", get_main_kb(), reply_to=cm_id)
-                elif text == "🎣 Рыбалка":
-                    earned = random.randint(20, 300)
-                    set_balance(user_id, balance + earned)
-                    send_msg(peer_id, f"🎣 Ты поймал рыбу и продал за {earned} монет!", get_main_kb(), reply_to=cm_id)
-                elif text == "🏹 Охота":
-                    earned = random.randint(10, 500)
-                    set_balance(user_id, balance + earned)
-                    send_msg(peer_id, f"🏹 Ты удачно поохотился и заработал {earned} монет!", get_main_kb(), reply_to=cm_id)
-                elif text == "👤 Профиль" or text_lower == "/профиль":
-                    send_msg(peer_id, f"👤 Твой баланс: {balance} монет", get_main_kb(), reply_to=cm_id)
-                elif text == "📖 Помощь" or text_lower == "/help":
-                    help_text = "📖 Жми на кнопки, чтобы играть и зарабатывать!"
-                    send_msg(peer_id, help_text, get_main_kb(), reply_to=cm_id)
-                
-                elif user_id in waiting_for_bet:
-                    if text.isdigit():
-                        bet = int(text)
-                        game_type = waiting_for_bet[user_id]
-                        del waiting_for_bet[user_id]
-                        
-                        if bet > balance or bet < 10:
-                            send_msg(peer_id, f"❌ Ошибка: мин. ставка 10, баланс {balance}.", get_main_kb(), reply_to=cm_id)
-                        else:
-                            res = random.randint(0, 36)
-                            if res in [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36]:
-                                set_balance(user_id, balance + bet)
-                                send_msg(peer_id, f"🎉 ПОБЕДА! Выпало {res} 🔴. Ты выиграл {bet}!", get_main_kb(), reply_to=cm_id)
-                            else:
-                                set_balance(user_id, balance - bet)
-                                send_msg(peer_id, f"😔 ПРОИГРЫШ. Выпало {res}. Ты потерял {bet}.", get_main_kb(), reply_to=cm_id)
-                    else:
-                        send_msg(peer_id, "❌ Введи число.", get_main_kb(), reply_to=cm_id)
+# 10. Обработка кнопки "Активировать"
+@bot.on.message(payload={"cmd": "activate_chat"})
+async def activate_chat_handler(message: Message):
+    if message.from_id != ADMIN_ID:
+        await message.answer("❌ Ошибка! Только владелец бота может активировать его здесь.")
+        return
+    
+    # Редактируем сообщение, убирая кнопку
+    await bot.api.messages.edit(
+        peer_id=message.peer_id,
+        message="Отлично! У бота теперь есть администратор. Напиши /help, чтобы узнать все команды. ❤️",
+        conversation_message_id=message.conversation_message_id
+    )
 
-    except Exception as e:
-        print(f"⚠️ Ошибка: {e}")
-        time.sleep(2)
+# Запуск
+async def main():
+    await init_db()
+    print("Бот запущен на vkbottle!")
+    await bot.run_polling()
+
+if __name__ == "__main__":
+    asyncio.run(main())
