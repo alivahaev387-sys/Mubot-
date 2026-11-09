@@ -8,7 +8,7 @@ vk_session = vk_api.VkApi(token=TOKEN)
 longpoll = VkBotLongPoll(vk_session, GROUP_ID)
 vk = vk_session.get_api()
 
-print("ТЕСТОВЫЙ БОТ ЗАПУЩЕН!")
+print("БОТ ЗАПУЩЕН!")
 
 while True:
     try:
@@ -16,14 +16,13 @@ while True:
             if event.type == VkBotEventType.MESSAGE_NEW and event.object.message.get('text'):
                 msg = event.object.message
                 peer_id = msg['peer_id']
-                text = msg.get('text', '').lower()
+                text = msg.get('text', '').lower().strip()
                 
-                if "начать" in text or "start" in text:
+                if text in ["начать", "start", "/help"]:
                     vk.messages.send(
                         peer_id=peer_id,
-                        message="Привет! Код работает.",
+                        message="Привет! Я работаю. (Это тест)",
                         random_id=0
                     )
-                    print("ОТВЕТ ОТПРАВЛЕН!")
     except Exception as e:
         print(f"ОШИБКА: {e}")
