@@ -1,2 +1,2 @@
-vkbottle
-aiosqlite
+vk.api
+requests 
