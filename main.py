@@ -1,7 +1,7 @@
 import random
 import asyncio
 import aiosqlite
-from vkbottle.bot import Bot, Message
+from vkbottle.bot import Bot, Message, rules
 from vkbottle import Keyboard, KeyboardButtonColor, Text, GroupEventType
 
 # --- НАСТРОЙКИ ---
@@ -151,20 +151,17 @@ async def create_promo_handler(message: Message, name: str, amount: int):
         except aiosqlite.IntegrityError:
             await message.reply("❌ Такой промокод уже существует.")
 
-# 9. Приветствие при добавлении БОТА в беседу
-@bot.on.raw_event(GroupEventType.CHAT_INVITE_USER, dataclass=dict)
-async def on_chat_invite(event_data: dict):
+# 9. Приветствие при добавлении БОТА в беседу (ИСПРАВЛЕНО)
+@bot.on.chat_message(rules.ChatActionRule("chat_invite_user"))
+async def on_chat_invite(message: Message):
     # Проверяем, что добавили именно бота (ID группы со знаком минус)
-    if event_data['object']['member_id'] == -GROUP_ID:
+    if message.action and message.action.member_id == -GROUP_ID:
         kb = Keyboard(inline=True)
-        # Важно: payload должен быть строкой JSON или словарем
         kb.add(Text("Активировать", payload={"cmd": "activate_chat"}), color=KeyboardButtonColor.POSITIVE)
         
-        await bot.api.messages.send(
-            peer_id=event_data['object']['peer_id'],
-            message="👋 Привет! Я игровой бот. Нажмите кнопку ниже, чтобы активировать меня в этом чате.\n(Активация доступна только владельцу бота).",
-            keyboard=kb.get_json(),
-            random_id=0
+        await message.answer(
+            "👋 Привет! Я игровой бот. Нажмите кнопку ниже, чтобы активировать меня в этом чате.\n(Активация доступна только владельцу бота).",
+            keyboard=kb.get_json()
         )
 
 # 10. Обработка нажатия кнопки "Активировать"
