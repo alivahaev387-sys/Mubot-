@@ -5,7 +5,6 @@ import json, random, sqlite3, time
 # ===== ТОКЕН И НАСТРОЙКИ =====
 TOKEN = "vk1.a.Fgowv-iH2wbOXG7ra56zmUWabQJy2OBRma9n4V3ufueJ_FJrbt5K_t9dOu_OtC-xF1iTWBi8yX5bGOmQ1kbQExof1U4IZKgoO6NVGNg9aaR17ECXar65GK6s-LdkflKto0qhZddvXHeDhxkFeya3z5XN80QnNGB7F676pFOs4xScHkUyvyvodMk5QsFpDHSrJ45m23CVzidcr1reHfrqW5ci9FxMDEhiF3JGG1021qQ"
 GROUP_ID = 243089386
-ADMIN_ID = 200005093141 # Твой ID для уведомлений
 
 vk_session = vk_api.VkApi(token=TOKEN)
 longpoll = VkBotLongPoll(vk_session, GROUP_ID)
@@ -13,7 +12,7 @@ vk = vk_session.get_api()
 
 # Состояния
 waiting_for_bet = {} 
-active_chats = set() # Активные беседы
+active_chats = set() # Тут храним ID бесед, где бот активирован
 
 # --- БАЗА ДАННЫХ ---
 def init_db():
@@ -46,89 +45,48 @@ def update_player(user_id, coin_change, xp_change, win_change=0):
 
 init_db()
 
-# --- ОТПРАВКА СООБЩЕНИЙ (С РЕПЛАЕМ) ---
-def send_msg(peer_id, message, keyboard=None, reply_to=None):
+# --- ОТПРАВКА СООБЩЕНИЙ (БЕЗ КЛАВИАТУР) ---
+def send_msg(peer_id, message, reply_to=None):
     try:
         params = {
             'peer_id': peer_id,
             'message': message,
             'random_id': random.randint(1, 2**31 - 1)
         }
-        if keyboard: params['keyboard'] = keyboard
         if reply_to: params['reply_to'] = reply_to
         return vk.messages.send(**params)
     except Exception as e:
         print(f"Ошибка: {e}")
 
-# --- КЛАВИАТУРЫ ---
-def get_main_kb():
-    return json.dumps({
-        "one_time": False, 
-        "buttons": [
-            [{"action": {"type": "text", "label": "👤 Профиль"}, "color": "primary"},
-             {"action": {"type": "text", "label": "🏆 Топ игроков"}, "color": "secondary"}],
-            [{"action": {"type": "text", "label": "📖 Помощь"}, "color": "negative"}]
-        ]
-    }, ensure_ascii=False)
-
-# Кнопка активации для беседы
-def get_activate_kb():
-    return json.dumps({
-        "one_time": False, 
-        "buttons": [
-            [{"action": {"type": "text", "label": "🎮 Активировать бота"}, "color": "positive"}]
-        ]
-    }, ensure_ascii=False)
-
 # ===== ЗАПУСК =====
-print("ИГРОВОЙ БОТ ЗАПУЩЕН (С РЕЖИМОМ БЕСЕД)!")
+print("ИГРОВОЙ БОТ ЗАПУЩЕН (ТОЛЬКО КОМАНДЫ)!")
 
 while True:
     try:
         for event in longpoll.listen():
             
-            # === ОБРАБОТКА ДОБАВЛЕНИЯ В БЕСЕДУ ===
+            # Обработка добавления в беседу
             if event.type == VkBotEventType.MESSAGE_NEW and event.object.message.get('action'):
                 action = event.object.message['action']
                 if action.get('type') == 'chat_invite_user' and action.get('member_id') == -GROUP_ID:
                     peer_id = event.object.message['peer_id']
-                    
-                    # Бот добавлен. Отправляем приветствие.
                     text = ("Привет! Я игровой бот.\n\n"
-                            "Чтобы я работал, выдай мне права администратора беседы и нажми на кнопку ниже.")
-                    send_msg(peer_id, text, keyboard=get_activate_kb())
+                            "Чтобы я работал, напиши команду /активировать (только для админов беседы).")
+                    send_msg(peer_id, text)
                     continue
 
-            # === ОБРАБОТКА СООБЩЕНИЙ ===
+            # Обработка сообщений
             if event.type == VkBotEventType.MESSAGE_NEW and event.object.message['text']:
                 msg = event.object.message
                 peer_id = msg['peer_id']
                 user_id = msg['from_id'] 
                 msg_id = msg.get('id')
-                text = msg.get('text', '').strip().lower()
+                text = msg.get('text', '').strip().lower().replace("@club243089386", "")
                 
                 is_chat = peer_id > 2000000000
 
-                # === АКТИВАЦИЯ БОТА В БЕСЕДЕ ===
-                if is_chat and (text == "🎮 активировать бота" or text == "активировать бота"):
-                    # Проверяем, есть ли у бота права админа
-                    try:
-                        admins = vk.messages.getConversationMembers(peer_id=peer_id)['items']
-                        bot_rights = None
-                        for a in admins:
-                            if a['member_id'] == -GROUP_ID:
-                                bot_rights = a.get('is_admin', False)
-                                break
-                        
-                        if not bot_rights:
-                            send_msg(peer_id, "Ошибка: у бота нету администратора. Выдайте боту права администратора беседы.", reply_to=msg_id)
-                            continue
-                            
-                    except Exception as e:
-                        send_msg(peer_id, "Ошибка: не удалось проверить права.", reply_to=msg_id)
-                        continue
-
-                    # Проверяем, является ли нажавший админом
+                # === АКТИВАЦИЯ ===
+                if is_chat and text == "/активировать":
                     try:
                         admins = vk.messages.getConversationMembers(peer_id=peer_id)['items']
                         is_user_admin = False
@@ -140,20 +98,16 @@ while True:
                         if not is_user_admin:
                             send_msg(peer_id, "Ошибка: вы не являетесь администратором беседы.", reply_to=msg_id)
                             continue
-                            
-                    except Exception as e:
-                        send_msg(peer_id, "Ошибка: не удалось проверить ваши права.", reply_to=msg_id)
-                        continue
-
-                    # Если всё ок — активируем
-                    active_chats.add(peer_id)
-                    send_msg(peer_id, "✅ Бот успешно активирован в беседе!\nТеперь тут работают игровые команды (/help).", keyboard=get_main_kb(), reply_to=msg_id)
+                        
+                        active_chats.add(peer_id)
+                        send_msg(peer_id, "✅ Бот активирован! Теперь пиши /help.", reply_to=msg_id)
+                    except Exception:
+                        send_msg(peer_id, "Ошибка: не удалось проверить права.", reply_to=msg_id)
                     continue
 
-                # === ИГРОВЫЕ КОМАНДЫ ===
-                # Работаем только в ЛС или в активированных беседах
+                # Фильтр бесед
                 if is_chat and peer_id not in active_chats:
-                    continue # Игнорируем беседы, где бот не активирован
+                    continue
 
                 balance, xp, wins = get_player(user_id)
 
@@ -165,7 +119,7 @@ while True:
                     
                     if text in ["отмена", "назад"]:
                         del waiting_for_bet[user_id]
-                        send_msg(peer_id, "Ставка отменена.", get_main_kb(), reply_to=msg_id)
+                        send_msg(peer_id, "Ставка отменена.", reply_to=msg_id)
                         continue
                         
                     try:
@@ -178,10 +132,10 @@ while True:
                         continue
 
                     if bet_amount < 10:
-                        send_msg(peer_id, "❌ Минимальная ставка — 10 монет.", reply_to=msg_id)
+                        send_msg(peer_id, "❌ Мин. ставка — 10.", reply_to=msg_id)
                         continue
                     if bet_amount > balance:
-                        send_msg(peer_id, f"❌ У тебя нет столько денег! Баланс: {balance}", reply_to=msg_id)
+                        send_msg(peer_id, f"❌ Нет денег! Баланс: {balance}", reply_to=msg_id)
                         continue
 
                     del waiting_for_bet[user_id]
@@ -208,17 +162,17 @@ while True:
                         else:
                             update_player(user_id, -bet_amount, 5, 0)
                             res_text = f"😔 ПРОИГРЫШ!\n\nВыпало: {num_text}\nТы потерял {bet_amount} монет."
-                        send_msg(peer_id, res_text, get_main_kb(), reply_to=msg_id)
+                        send_msg(peer_id, res_text, reply_to=msg_id)
 
                     elif game_type == "drim":
                         result_num = random.randint(1, 15)
                         if result_num == choice:
                             update_player(user_id, bet_amount * 10, 50, 1)
-                            res_text = f"🔥 ДЖЕКПОТ! 🔥\n\nВыпало число: {result_num}\nТы выиграл x10: +{bet_amount * 10} монет!"
+                            res_text = f"🔥 ДЖЕКПОТ! 🔥\n\nВыпало: {result_num}\nТы выиграл x10: +{bet_amount * 10} монет!"
                         else:
                             update_player(user_id, -bet_amount, 5, 0)
-                            res_text = f"😔 ПРОИГРЫШ!\n\nВыпало число: {result_num}\nТы потерял {bet_amount} монет."
-                        send_msg(peer_id, res_text, get_main_kb(), reply_to=msg_id)
+                            res_text = f"😔 ПРОИГРЫШ!\n\nВыпало: {result_num}\nТы потерял {bet_amount} монет."
+                        send_msg(peer_id, res_text, reply_to=msg_id)
                     
                     elif game_type == "rps":
                         bot_choice = random.choice(["камень", "ножницы", "бумага"])
@@ -230,34 +184,34 @@ while True:
                              (choice == "бумага" and bot_choice == "камень"): win = True
                              
                         if draw:
-                            res_text = f"🤝 НИЧЬЯ!\n\nТы: {choice}\nБот: {bot_choice}\nТвои монеты возвращаются."
+                            res_text = f"🤝 НИЧЬЯ!\n\nТы: {choice}\nБот: {bot_choice}"
                         elif win:
                             update_player(user_id, bet_amount, 15, 1)
                             res_text = f"🎉 ПОБЕДА!\n\nТы: {choice}\nБот: {bot_choice}\nТы выиграл {bet_amount} монет!"
                         else:
                             update_player(user_id, -bet_amount, 5, 0)
                             res_text = f"😔 ПРОИГРЫШ!\n\nТы: {choice}\nБот: {bot_choice}\nТы потерял {bet_amount} монет."
-                        send_msg(peer_id, res_text, get_main_kb(), reply_to=msg_id)
+                        send_msg(peer_id, res_text, reply_to=msg_id)
                     continue
 
-                # Основные команды
+                # Команды
                 if text == "/help" or text == "помощь":
-                    help_text = ("📖 Доступные команды:\n\n"
+                    help_text = ("📖 Команды:\n\n"
                                  "🎰 /казино — меню игр\n"
-                                 "🔴 /красное или /черное (x2)\n"
-                                 "🟢 /чет или /нечет (x2)\n"
+                                 "🔴 /красное или /черное\n"
+                                 "🟢 /чет или /нечет\n"
                                  "🔢 /дрим [1-15] (x10)\n"
                                  "✂️ /rps [камень/ножницы/бумага]\n"
                                  "⚔️ /duel @игрок [сумма]\n\n"
                                  "👤 /профиль\n"
                                  "🏆 /топ")
-                    send_msg(peer_id, help_text, get_main_kb(), reply_to=msg_id)
+                    send_msg(peer_id, help_text, reply_to=msg_id)
                 
                 elif text in ["начать", "start", "меню"]:
-                    send_msg(peer_id, "🎰 Твой баланс: " + str(balance) + " монет.\nВведи /help для списка команд.", get_main_kb(), reply_to=msg_id)
+                    send_msg(peer_id, "🎰 Твой баланс: " + str(balance) + " монет.\nВведи /help.", reply_to=msg_id)
                 
                 elif text == "/казино":
-                    send_msg(peer_id, "🎰 Игры:\n/красное\n/черное\n/чет\n/нечет\n/дрим [1-15]\n/rps [камень/ножницы/бумага]", get_main_kb(), reply_to=msg_id)
+                    send_msg(peer_id, "🎰 Игры:\n/красное\n/черное\n/чет\n/нечет\n/дрим [1-15]\n/rps [камень/ножницы/бумага]", reply_to=msg_id)
                 
                 elif text == "/красное":
                     waiting_for_bet[user_id] = {"game": "color", "choice": "red"}
@@ -293,7 +247,7 @@ while True:
                             amount = int(parts[2])
                             if amount > 0 and amount <= balance:
                                 if amount < 10:
-                                    send_msg(peer_id, "❌ Мин. перевод 10 монет.", reply_to=msg_id)
+                                    send_msg(peer_id, "❌ Мин. перевод 10.", reply_to=msg_id)
                                 else:
                                     update_player(user_id, -amount, 0)
                                     update_player(int(target), amount, 0)
@@ -306,7 +260,7 @@ while True:
                         send_msg(peer_id, "❌ Напиши: /duel @id123456 500", reply_to=msg_id)
                 elif "профиль" in text or "/профиль" in text:
                     status = "🥉 Новичок" if xp < 100 else "🥈 Опытный" if xp < 500 else "🥇 Мастер" if xp < 2000 else "💎 Хайроллер"
-                    send_msg(peer_id, f"👤 Профиль:\n💰 Баланс: {balance}\n⭐ Опыт: {xp} XP\n🏆 Побед: {wins}\nСтатус: {status}", get_main_kb(), reply_to=msg_id)
+                    send_msg(peer_id, f"👤 Профиль:\n💰 Баланс: {balance}\n⭐ Опыт: {xp} XP\n🏆 Побед: {wins}\nСтатус: {status}", reply_to=msg_id)
                 elif "топ" in text or "/топ" in text:
                     conn = sqlite3.connect('casino.db')
                     c = conn.cursor()
@@ -316,9 +270,9 @@ while True:
                     top_text = "🏆 Топ 5 богачей:\n\n"
                     for i, (u, b) in enumerate(top, 1):
                         top_text += f"{i}. [id{u}|Игрок] — {b} монет\n"
-                    send_msg(peer_id, top_text, get_main_kb(), reply_to=msg_id)
+                    send_msg(peer_id, top_text, reply_to=msg_id)
                 elif not is_chat:
-                    send_msg(peer_id, "Неизвестная команда. Напиши /help.", get_main_kb(), reply_to=msg_id)
+                    send_msg(peer_id, "Неизвестная команда. /help", reply_to=msg_id)
 
     except Exception as e:
         print(f"⚠️ Ошибка: {e}")
