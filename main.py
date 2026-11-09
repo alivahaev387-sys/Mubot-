@@ -59,17 +59,17 @@ def send_msg(peer_id, message, keyboard=None, reply_to=None):
     except Exception as e:
         print(f"Ошибка отправки: {e}")
 
-# Инлайн-кнопка для активации в беседе
+# Кнопка активации
 def get_activate_kb():
     return json.dumps({
         "inline": True,
         "buttons": [
-            [{"action": {"type": "callback", "label": "🎮 Активировать бота", "payload": json.dumps({"cmd": "activate"})}, "color": "positive"}]
+            [{"action": {"type": "callback", "label": "🎮 Активировать", "payload": json.dumps({"cmd": "activate"})}, "color": "positive"}]
         ]
     }, ensure_ascii=False)
 
 # ===== ЗАПУСК =====
-print("БОТ ЗАПУЩЕН С ПОЛНЫМ ФУНКЦИОНАЛОМ!")
+print("БОТ ЗАПУЩЕН С ИГРАМИ И БЕСЕДАМИ!")
 
 while True:
     try:
@@ -81,11 +81,11 @@ while True:
                 if action.get('type') == 'chat_invite_user' and action.get('member_id') == -GROUP_ID:
                     peer_id = event.object.message['peer_id']
                     text = ("Привет! Я игровой бот.\n\n"
-                            "Чтобы я заработал, добавь беседу и выдай администратора, затем нажми на кнопку ниже.")
+                            "Чтобы включить игры, админ беседы должен нажать на кнопку ниже.")
                     send_msg(peer_id, text, keyboard=get_activate_kb())
                     continue
 
-            # 2. Обработка нажатий на кнопки
+            # 2. Нажатие на кнопку активации
             if event.type == VkBotEventType.MESSAGE_EVENT:
                 payload = event.object.payload
                 user_id = event.object.user_id
@@ -104,12 +104,11 @@ while True:
                         if is_admin:
                             active_chats.add(peer_id)
                             vk.messages.sendMessageEventAnswer(event_id=event_id, user_id=user_id, peer_id=peer_id, event_data=json.dumps({"type": "show_snackbar", "text": "✅ Успешно!"}))
-                            send_msg(peer_id, "✅ Бот успешно активирован!\nПиши /help, чтобы увидеть команды.", reply_to=event.object.conversation_message_id)
+                            send_msg(peer_id, "✅ Бот активирован!\nПиши /help.", reply_to=event.object.conversation_message_id)
                         else:
-                            vk.messages.sendMessageEventAnswer(event_id=event_id, user_id=user_id, peer_id=peer_id, event_data=json.dumps({"type": "show_snackbar", "text": "❌ Ошибка: вы не являетесь администратором беседы!"}))
+                            vk.messages.sendMessageEventAnswer(event_id=event_id, user_id=user_id, peer_id=peer_id, event_data=json.dumps({"type": "show_snackbar", "text": "❌ Вы не администратор!"}))
                     except Exception as e:
                         print(f"Ошибка проверки: {e}")
-                        vk.messages.sendMessageEventAnswer(event_id=event_id, user_id=user_id, peer_id=peer_id, event_data=json.dumps({"type": "show_snackbar", "text": "⚠️ Ошибка: выдайте боту админку."}))
                 continue
 
             # 3. Обработка текста
@@ -122,9 +121,8 @@ while True:
                 
                 is_chat = peer_id > 2000000000
 
-                # В беседах, если не активировано — отвечаем приветствием
+                # Если это беседа и она не активирована, бот молчит
                 if is_chat and peer_id not in active_chats:
-                    send_msg(peer_id, "Спасибо, что выбрали именно наш бот!\nВведите /help", reply_to=msg_id)
                     continue
 
                 balance, xp, wins = get_player(user_id)
@@ -212,7 +210,7 @@ while True:
                         send_msg(peer_id, res_text, reply_to=msg_id)
                     continue
 
-                # Основные команды
+                # Команды
                 if text == "/help" or text == "помощь":
                     help_text = ("📖 Команды:\n\n"
                                  "🎰 /казино\n"
