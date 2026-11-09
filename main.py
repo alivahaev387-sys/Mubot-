@@ -11,7 +11,7 @@ vk_session = vk_api.VkApi(token=TOKEN)
 longpoll = VkBotLongPoll(vk_session, GROUP_ID)
 vk = vk_session.get_api()
 
-# --- БАЗА ДАННЫХ (Теперь всё сохраняется) ---
+# --- БАЗА ДАННЫХ ---
 def init_db():
     conn = sqlite3.connect('casino.db')
     c = conn.cursor()
@@ -41,20 +41,20 @@ def set_balance(user_id, amount):
     conn.commit()
     conn.close()
 
-def add_promo(code, amount):
+def add_promo(name, amount):
     conn = sqlite3.connect('casino.db')
     c = conn.cursor()
-    c.execute("INSERT OR REPLACE INTO promos (code, amount) VALUES (?, ?)", (code, amount))
+    c.execute("INSERT OR REPLACE INTO promos (code, amount) VALUES (?, ?)", (name.upper(), amount))
     conn.commit()
     conn.close()
 
-def use_promo(code):
+def use_promo(name):
     conn = sqlite3.connect('casino.db')
     c = conn.cursor()
-    c.execute("SELECT amount FROM promos WHERE code = ?", (code,))
+    c.execute("SELECT amount FROM promos WHERE code = ?", (name.upper(),))
     row = c.fetchone()
     if row:
-        c.execute("DELETE FROM promos WHERE code = ?", (code,))
+        c.execute("DELETE FROM promos WHERE code = ?", (name.upper(),))
         conn.commit()
         conn.close()
         return row[0]
@@ -63,7 +63,7 @@ def use_promo(code):
 
 init_db()
 
-# --- ФУНКЦИЯ ОТПРАВКИ (ИСПРАВЛЕН РЕПЛАЙ) ---
+# --- ОТПРАВКА СООБЩЕНИЙ ---
 def send_msg(peer_id, message, keyboard=None, reply_to=None):
     try:
         params = {
@@ -72,9 +72,7 @@ def send_msg(peer_id, message, keyboard=None, reply_to=None):
             'random_id': random.randint(1, 2**31 - 1)
         }
         if keyboard: params['keyboard'] = keyboard
-        if reply_to: 
-            # Для бесед и ЛС используется conversation_message_id
-            params['reply_to'] = reply_to
+        if reply_to: params['reply_to'] = reply_to
         return vk.messages.send(**params)
     except Exception as e:
         print(f"Ошибка отправки: {e}")
@@ -115,7 +113,7 @@ while True:
                 msg = event.object.message
                 peer_id = msg['peer_id']
                 user_id = msg['from_id'] 
-                cm_id = msg.get('conversation_message_id') # Используем для реплая
+                cm_id = msg.get('conversation_message_id')
                 
                 text = msg.get('text', '').strip()
                 text_lower = text.lower()
@@ -238,13 +236,13 @@ while True:
 
                 elif text_lower.startswith("/promo"):
                     if len(parts) == 2:
-                        code = parts[1].upper()
-                        amount = use_promo(code)
+                        name = parts[1].upper()
+                        amount = use_promo(name)
                         if amount:
                             set_balance(user_id, balance + amount)
-                            send_msg(peer_id, f"🎁 Промокод активирован! +{amount} монет.", reply_to=cm_id)
+                            send_msg(peer_id, f"🎁 Промокод {name} активирован! +{amount} монет.", reply_to=cm_id)
                         else:
-                            send_msg(peer_id, "❌ Неверный или использованный промокод.", reply_to=cm_id)
+                            send_msg(peer_id, "❌ Неверное название или промокод уже использован.", reply_to=cm_id)
                     else:
                         send_msg(peer_id, "❌ Напиши: /promo [название]", reply_to=cm_id)
 
@@ -257,13 +255,17 @@ while True:
                                  "🔴 /нечет [сумма]\n"
                                  "🔢 /дрим [1-15] [сумма]\n"
                                  "✂️ /rps [камень/ножницы/бумага] [сумма]\n"
-                                 "🎁 /promo [код]\n\n"
+                                 "🎁 /promo [название]\n\n"
                                  "👤 /профиль\n"
                                  "🏆 /топ")
+                    
+                    # Если админ, показываем ему секретную команду
+                    if user_id == ADMIN_ID:
+                        help_text += "\n\n👑 Для админа:\n/создать промокод [название] [сумма]"
+                        
                     send_msg(peer_id, help_text, reply_to=cm_id)
                 
                 elif text_lower in ["начать", "start", "меню"]:
-                    # Один раз в ЛС отправляем приветствие, в беседе молчим
                     if is_ls:
                         send_msg(peer_id, "🎰 Спасибо, что выбрали именно наш бот!\nВведи /help, чтобы увидеть команды.", reply_to=cm_id)
                 
@@ -283,7 +285,7 @@ while True:
                             top_text += f"{i}. [id{u}|Игрок] — {b} монет\n"
                     send_msg(peer_id, top_text, reply_to=cm_id)
                 
-                # Если бот не знает команду — просто ИГНОРИРУЕТ (ничего не пишет)
+                # Если бот не знает команду — просто ИГНОРИРУЕТ
 
     except Exception as e:
         print(f"⚠️ Ошибка: {e}")
