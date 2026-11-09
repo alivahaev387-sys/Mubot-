@@ -11,11 +11,9 @@ vk_session = vk_api.VkApi(token=TOKEN)
 longpoll = VkBotLongPoll(vk_session, GROUP_ID)
 vk = vk_session.get_api()
 
-# Хранилище в памяти
 balances = {}
 active_chats = set()
 waiting_for_bet = {}
-promocodes = {}
 
 def get_balance(user_id):
     return balances.get(user_id, 1000)
@@ -64,7 +62,7 @@ def get_activate_kb():
         ]
     }, ensure_ascii=False)
 
-print("БОТ ЗАПУЩЕН!")
+print("БОТ ЗАПУЩЕН (ИГРОВАЯ ВЕРСИЯ)!")
 
 while True:
     try:
