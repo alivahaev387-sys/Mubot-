@@ -69,13 +69,13 @@ def get_activate_kb():
     }, ensure_ascii=False)
 
 # ===== ЗАПУСК =====
-print("БОТ ЗАПУЩЕН!")
+print("БОТ ЗАПУЩЕН И ГОТОВ К РАБОТЕ!")
 
 while True:
     try:
         for event in longpoll.listen():
             
-            # Приглашение в беседу
+            # Приглашение в беседу (отправляем кнопку)
             if event.type == VkBotEventType.MESSAGE_NEW and event.object.message.get('action'):
                 action = event.object.message['action']
                 if action.get('type') == 'chat_invite_user' and action.get('member_id') == -GROUP_ID:
@@ -123,15 +123,14 @@ while True:
                 
                 is_chat = peer_id > 2000000000
 
-                # Если беседа не активирована, бот молчит (игнорирует всё, кроме /активировать текстом на всякий случай)
+                # Если это беседа и она не активирована, бот молчит.
+                # В личных сообщениях (is_chat = False) бот работает всегда.
                 if is_chat and peer_id not in active_chats:
-                    if text == "/активировать":
-                        send_msg(peer_id, "❌ Нажмите на кнопку '🎮 Активировать' в сообщении выше.", reply_to=msg_id)
                     continue
 
                 balance, xp, wins = get_player(user_id)
 
-                # Ожидание ставки
+                # --- ОЖИДАНИЕ СТАВКИ ---
                 if user_id in waiting_for_bet:
                     game_data = waiting_for_bet[user_id]
                     game_type = game_data["game"]
@@ -214,7 +213,7 @@ while True:
                         send_msg(peer_id, res_text, reply_to=msg_id)
                     continue
 
-                # Основные команды
+                # --- КОМАНДЫ ---
                 if text == "/help" or text == "помощь":
                     help_text = ("📖 Команды:\n\n"
                                  "🎰 /казино\n"
@@ -291,8 +290,6 @@ while True:
                     for i, (u, b) in enumerate(top, 1):
                         top_text += f"{i}. [id{u}|Игрок] — {b} монет\n"
                     send_msg(peer_id, top_text, reply_to=msg_id)
-                elif not is_chat:
-                    send_msg(peer_id, "Неизвестная команда. /help", reply_to=msg_id)
 
     except Exception as e:
         print(f"⚠️ Ошибка: {e}")
