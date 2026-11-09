@@ -11,7 +11,6 @@ vk_session = vk_api.VkApi(token=TOKEN)
 longpoll = VkBotLongPoll(vk_session, GROUP_ID)
 vk = vk_session.get_api()
 
-# Хранилища в памяти
 balances = {}
 promocodes = {}
 active_chats = set()
@@ -22,15 +21,13 @@ def get_balance(user_id):
 def set_balance(user_id, amount):
     balances[user_id] = amount
 
-# Универсальная функция отправки
-def send_msg(peer_id, message, keyboard=None, reply_to=None):
+def send_msg(peer_id, message, reply_to=None):
     try:
         params = {
             'peer_id': peer_id,
             'message': message,
             'random_id': random.randint(1, 2**31 - 1)
         }
-        if keyboard: params['keyboard'] = keyboard
         if reply_to: params['reply_to'] = reply_to
         return vk.messages.send(**params)
     except Exception as e:
@@ -44,30 +41,30 @@ def get_activate_kb():
         ]
     }, ensure_ascii=False)
 
-print("БОТ УСПЕШНО ЗАПУЩЕН!")
+print("БОТ ЗАПУЩЕН (ФИНАЛЬНЫЙ)!")
 
 while True:
     try:
         for event in longpoll.listen():
             
-            # 1. Приглашение в беседу
+            # Добавление в беседу
             if event.type == VkBotEventType.MESSAGE_NEW and event.object.message.get('action'):
                 action = event.object.message['action']
                 if action.get('type') == 'chat_invite_user' and action.get('member_id') == -GROUP_ID:
                     peer_id = event.object.message['peer_id']
-                    send_msg(peer_id, "Привет! Я игровой бот.\nЧтобы включить игры, нажми на кнопку.", get_activate_kb())
+                    send_msg(peer_id, "Привет! Я игровой бот.\nНажми на кнопку, чтобы включить игры.", get_activate_kb())
                     continue
 
-            # 2. Нажатие на кнопку в беседе
+            # Кнопка активации
             if event.type == VkBotEventType.MESSAGE_EVENT:
                 payload = event.object.payload
                 if payload.get("cmd") == "activate":
                     active_chats.add(event.object.peer_id)
                     vk.messages.sendMessageEventAnswer(event_id=event.object.event_id, user_id=event.object.user_id, peer_id=event.object.peer_id, event_data=json.dumps({"type": "show_snackbar", "text": "✅ Успешно!"}))
-                    send_msg(event.object.peer_id, "✅ Бот активирован в этой беседе!\nПиши /help.")
+                    send_msg(event.object.peer_id, "✅ Бот активирован! Пиши /help.")
                 continue
 
-            # 3. Обработка текста (Работает ВЕЗДЕ)
+            # Текстовые сообщения
             if event.type == VkBotEventType.MESSAGE_NEW and event.object.message.get('text'):
                 msg = event.object.message
                 peer_id = msg['peer_id']
@@ -192,9 +189,21 @@ while True:
                     else:
                         send_msg(peer_id, "❌ Напиши: /создать промокод [название] [сумма]", reply_to=msg_id)
 
-                elif text_lower.startswith("/активировать"):
+                elif text_lower.startswith("/promo"):
                     if len(parts) == 2:
                         code = parts[1].upper()
+                        
+                        # ПРОВЕРКА НА ПОДПИСКУ
+                        try:
+                            member = vk.groups.isMember(group_id=GROUP_ID, user_id=user_id)
+                            if member != 1:
+                                send_msg(peer_id, "❌ Вы должны быть подписаны на сообщество, чтобы активировать промокод!", reply_to=msg_id)
+                                continue
+                        except Exception as e:
+                            print(f"Ошибка проверки подписки: {e}")
+                            send_msg(peer_id, "⚠️ Не удалось проверить подписку. Попробуйте позже.", reply_to=msg_id)
+                            continue
+
                         if code in promocodes:
                             amount = promocodes.pop(code)
                             set_balance(user_id, balance + amount)
@@ -202,7 +211,7 @@ while True:
                         else:
                             send_msg(peer_id, "❌ Неверный или использованный промокод.", reply_to=msg_id)
                     else:
-                        send_msg(peer_id, "❌ Напиши: /активировать [название]", reply_to=msg_id)
+                        send_msg(peer_id, "❌ Напиши: /promo [название]", reply_to=msg_id)
 
                 # Остальное
                 elif text_lower == "/help":
@@ -213,7 +222,7 @@ while True:
                                  "🔴 /нечет [сумма]\n"
                                  "🔢 /дрим [1-15] [сумма]\n"
                                  "✂️ /rps [камень/ножницы/бумага] [сумма]\n"
-                                 "🎁 /активировать [код]\n\n"
+                                 "🎁 /promo [код]\n\n"
                                  "👤 /профиль\n"
                                  "🏆 /топ")
                     send_msg(peer_id, help_text, reply_to=msg_id)
@@ -233,8 +242,7 @@ while True:
                             top_text += f"{i}. [id{u}|Игрок] — {b} монет\n"
                     send_msg(peer_id, top_text, reply_to=msg_id)
                 
-                else:
-                    send_msg(peer_id, "Спасибо, что выбрали именно наш бот!\nВведите /help", reply_to=msg_id)
+                # БОЛЬШЕ НЕТ ДЕФОЛТНОГО ОТВЕТА (просто игнорируем)
 
     except Exception as e:
         print(f"⚠️ Ошибка: {e}")
