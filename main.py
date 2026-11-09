@@ -3,12 +3,11 @@ from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
 import json, random, time
 import sqlite3
 
-# ===== ТОКЕН И НАСТРОЙКИ =====
+# ===== НАСТРОЙКИ =====
 TOKEN = "vk1.a.Fgowv-iH2wbOXG7ra56zmUWabQJy2OBRma9n4V3ufueJ_FJrbt5K_t9dOu_OtC-xF1iTWBi8yX5bGOmQ1kbQExof1U4IZKgoO6NVGNg9aaR17ECXar65GK6s-LdkflKto0qhZddvXHeDhxkFeya3z5XN80QnNGB7F676pFOs4xScHkUyvyvodMk5QsFpDHSrJ45m23CVzidcr1reHfrqW5ci9FxMDEhiF3JGG1021qQ"
 GROUP_ID = 243089386
 ADMIN_ID = 200005093141 
 
-# Подключение
 vk_session = vk_api.VkApi(token=TOKEN)
 longpoll = VkBotLongPoll(vk_session, GROUP_ID)
 vk = vk_session.get_api()
@@ -85,7 +84,16 @@ while True:
     try:
         for event in longpoll.listen():
             
-            # Обработка нажатий на кнопки (Callback)
+            # --- ОБРАБОТКА НАЖАТИЯ "НАЧАТЬ" (ПЕРВОЕ СООБЩЕНИЕ) ---
+            if event.type == VkBotEventType.MESSAGE_NEW and event.object.message.get('action'):
+                action = event.object.message['action']
+                if action.get('type') == 'chat_invite_user' and action.get('member_id') == -GROUP_ID:
+                    peer_id = event.object.message['peer_id']
+                    kb = json.dumps({"inline": True, "buttons": [[{"action": {"type": "callback", "label": "🎮 Активировать", "payload": json.dumps({"cmd": "activate"})}, "color": "positive"}]]}, ensure_ascii=False)
+                    send_msg(peer_id, "Привет! Я игровой бот. Выдай мне админку в беседе и нажми кнопку ниже.", kb)
+                    continue
+
+            # --- ОБРАБОТКА КНОПОК ---
             if event.type == VkBotEventType.MESSAGE_EVENT:
                 payload = event.object.payload
                 peer_id = event.object.peer_id
@@ -104,55 +112,45 @@ while True:
                         else:
                             vk.messages.sendMessageEventAnswer(event_id=event_id, user_id=user_id, peer_id=peer_id, event_data=json.dumps({"type": "show_snackbar", "text": "❌ Вы не админ!"}))
                     except Exception as e:
-                        print(f"Ошибка: {e}")
+                        print(f"Ошибка кнопки: {e}")
                 continue
 
-            # Обработка обычных сообщений
-            if event.type == VkBotEventType.MESSAGE_NEW and event.object.message.get('text'):
+            # --- ОБРАБОТКА ЛЮБЫХ ТЕКСТОВЫХ СООБЩЕНИЙ ---
+            if event.type == VkBotEventType.MESSAGE_NEW:
                 msg = event.object.message
-                peer_id = msg['peer_id']
-                user_id = msg['from_id'] 
-                cm_id = msg.get('conversation_message_id')
                 
+                # Если это ЛС, и текста нет (нажали "Начать" или стикер) — шлем меню
+                if msg['peer_id'] == msg['from_id'] and not msg.get('text'):
+                    send_msg(msg['peer_id'], f"👋 Привет! Твой баланс: {get_balance(msg['from_id'])}$\nВыбирай действие:", get_main_kb())
+                    continue
+
+                if not msg.get('text'):
+                    continue # Если в беседе пустое сообщение, игнорируем
+
                 text = msg.get('text', '').strip()
                 text_lower = text.lower()
                 parts = text_lower.split()
+                user_id = msg['from_id']
+                peer_id = msg['peer_id']
+                cm_id = msg.get('conversation_message_id')
                 is_ls = (peer_id == user_id)
 
-                # Игнорируем беседы, где бот не активирован
+                # Если бот в беседе, но его не активировали — молчим
                 if not is_ls and peer_id not in active_chats:
                     continue
 
                 balance = get_balance(user_id)
 
-                # --- БЕСЕДЫ ---
+                # --- ЛОГИКА БЕСЕД ---
                 if not is_ls:
                     if text_lower in ["/help", "/start"]:
-                        send_msg(peer_id, "📖 Команды в беседе:\n/работа\n/казино [сумма]\n/профиль\n/топ\n/promo [код]", reply_to=cm_id)
+                        send_msg(peer_id, "📖 Команды:\n/работа\n/профиль\n/топ\n/promo код", reply_to=cm_id)
                     elif text_lower == "/работа":
                         earned = random.randint(500, 1500)
                         update_balance(user_id, earned)
                         send_msg(peer_id, f"💼 Ты заработал {earned}$! Баланс: {get_balance(user_id)}$", reply_to=cm_id)
                     elif text_lower == "/профиль":
                         send_msg(peer_id, f"👤 Твой баланс: {balance}$", reply_to=cm_id)
-                    elif text_lower == "/топ":
-                        conn = sqlite3.connect('game.db')
-                        c = conn.cursor()
-                        c.execute("SELECT user_id, balance FROM users ORDER BY balance DESC LIMIT 5")
-                        top = c.fetchall()
-                        conn.close()
-                        top_text = "🏆 Топ 5:\n" + "\n".join([f"{i}. ID {u} — {b}$" for i, (u, b) in enumerate(top, 1)])
-                        send_msg(peer_id, top_text, reply_to=cm_id)
-                    elif text_lower.startswith("/промокод ") and user_id == ADMIN_ID:
-                        try:
-                            _, code, amount = parts
-                            conn = sqlite3.connect('game.db')
-                            conn.cursor().execute("INSERT INTO promos (code, reward) VALUES (?, ?)", (code, int(amount)))
-                            conn.commit()
-                            conn.close()
-                            send_msg(peer_id, f"✅ Промокод {code} на {amount}$ создан!", reply_to=cm_id)
-                        except:
-                            send_msg(peer_id, "❌ Ошибка создания промокода.", reply_to=cm_id)
                     elif text_lower.startswith("/promo "):
                         try:
                             code = parts[1]
@@ -169,12 +167,12 @@ while True:
                                 send_msg(peer_id, "❌ Неверный промокод.", reply_to=cm_id)
                             conn.close()
                         except:
-                            send_msg(peer_id, "❌ Формат: /promo код", reply_to=cm_id)
+                            pass
                     continue
 
-                # --- ЛИЧНЫЕ СООБЩЕНИЯ (ЛС) ---
-                # ФИКС КНОПКИ "НАЧАТЬ" (ВК отправляет её как start или begin)
-                if text_lower in ["начать", "start", "begin", "меню"]:
+                # --- ЛОГИКА ЛС (МЕНЮ) ---
+                # Если написали "начать", "start", "меню" или любую фигню при первом запуске
+                if text_lower in ["начать", "start", "begin", "меню", "привет", "hello"]:
                     send_msg(peer_id, f"🎰 Твой баланс: {balance}$\nВыбирай действие на кнопках 👇", get_main_kb(), reply_to=cm_id)
                 
                 elif text == "💼 Работа":
@@ -196,21 +194,11 @@ while True:
                     send_msg(peer_id, f"🎰 Введи сумму ставки (Баланс: {balance}$):", reply_to=cm_id)
                 
                 elif text == "👤 Профиль":
-                    send_msg(peer_id, f"👤 Твой профиль:\n💰 Баланс: {balance}$\n🆔 ID: {user_id}", get_main_kb(), reply_to=cm_id)
-                
-                elif text == "🏆 Топ":
-                    conn = sqlite3.connect('game.db')
-                    c = conn.cursor()
-                    c.execute("SELECT user_id, balance FROM users ORDER BY balance DESC LIMIT 5")
-                    top = c.fetchall()
-                    conn.close()
-                    top_text = "🏆 Топ 5:\n" + "\n".join([f"{i}. ID {u} — {b}$" for i, (u, b) in enumerate(top, 1)])
-                    send_msg(peer_id, top_text, get_main_kb(), reply_to=cm_id)
+                    send_msg(peer_id, f"👤 Твой профиль:\n💰 Баланс: {balance}$", get_main_kb(), reply_to=cm_id)
                 
                 elif text == "📖 Помощь":
                     send_msg(peer_id, "📖 Жми кнопки! Промокод: /promo [код]", get_main_kb(), reply_to=cm_id)
                 
-                # Ставка в Казино
                 elif user_id in waiting_for_bet:
                     if text.isdigit():
                         bet = int(text)
@@ -229,5 +217,5 @@ while True:
                         send_msg(peer_id, "❌ Введи число!", get_main_kb(), reply_to=cm_id)
 
     except Exception as e:
-        print(f"⚠️ Ошибка в цикле: {e}")
+        print(f"⚠️ Ошибка: {e}")
         time.sleep(1)
