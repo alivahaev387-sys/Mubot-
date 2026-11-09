@@ -12,7 +12,7 @@ vk = vk_session.get_api()
 
 # Состояния
 waiting_for_bet = {} 
-active_chats = set() # Тут храним ID бесед, где бот активирован
+active_chats = set()
 
 # --- БАЗА ДАННЫХ ---
 def init_db():
@@ -45,7 +45,7 @@ def update_player(user_id, coin_change, xp_change, win_change=0):
 
 init_db()
 
-# --- ОТПРАВКА СООБЩЕНИЙ (БЕЗ КЛАВИАТУР) ---
+# --- ОТПРАВКА СООБЩЕНИЙ ---
 def send_msg(peer_id, message, reply_to=None):
     try:
         params = {
@@ -56,10 +56,10 @@ def send_msg(peer_id, message, reply_to=None):
         if reply_to: params['reply_to'] = reply_to
         return vk.messages.send(**params)
     except Exception as e:
-        print(f"Ошибка: {e}")
+        print(f"Ошибка отправки: {e}")
 
 # ===== ЗАПУСК =====
-print("ИГРОВОЙ БОТ ЗАПУЩЕН (ТОЛЬКО КОМАНДЫ)!")
+print("ИГРОВОЙ БОТ ЗАПУЩЕН (ТЕКСТОВЫЕ КОМАНДЫ)!")
 
 while True:
     try:
@@ -76,7 +76,7 @@ while True:
                     continue
 
             # Обработка сообщений
-            if event.type == VkBotEventType.MESSAGE_NEW and event.object.message['text']:
+            if event.type == VkBotEventType.MESSAGE_NEW and event.object.message.get('text'):
                 msg = event.object.message
                 peer_id = msg['peer_id']
                 user_id = msg['from_id'] 
@@ -85,8 +85,9 @@ while True:
                 
                 is_chat = peer_id > 2000000000
 
-                # === АКТИВАЦИЯ ===
-                if is_chat and text == "/активировать":
+                # === АКТИВАЦИЯ В БЕСЕДЕ ===
+                if is_chat and (text == "/активировать" or text == "активировать"):
+                    # Проверяем, админ ли ты
                     try:
                         admins = vk.messages.getConversationMembers(peer_id=peer_id)['items']
                         is_user_admin = False
@@ -96,22 +97,23 @@ while True:
                                 break
                         
                         if not is_user_admin:
-                            send_msg(peer_id, "Ошибка: вы не являетесь администратором беседы.", reply_to=msg_id)
+                            send_msg(peer_id, "❌ Ошибка: вы не являетесь администратором беседы.", reply_to=msg_id)
                             continue
                         
                         active_chats.add(peer_id)
                         send_msg(peer_id, "✅ Бот активирован! Теперь пиши /help.", reply_to=msg_id)
-                    except Exception:
-                        send_msg(peer_id, "Ошибка: не удалось проверить права.", reply_to=msg_id)
+                    except Exception as e:
+                        print(f"Ошибка проверки прав: {e}")
+                        send_msg(peer_id, "⚠️ Ошибка: не удалось проверить права. Выдайте боту админку.", reply_to=msg_id)
                     continue
 
-                # Фильтр бесед
+                # Фильтр бесед (если не активирован — молчим)
                 if is_chat and peer_id not in active_chats:
                     continue
 
                 balance, xp, wins = get_player(user_id)
 
-                # Ожидание ставки
+                # --- ОЖИДАНИЕ СТАВКИ ---
                 if user_id in waiting_for_bet:
                     game_data = waiting_for_bet[user_id]
                     game_type = game_data["game"]
@@ -128,7 +130,7 @@ while True:
                         else:
                             bet_amount = int(text)
                     except ValueError:
-                        send_msg(peer_id, "❌ Введи число (сумму ставки) или напиши 'всё'.", reply_to=msg_id)
+                        send_msg(peer_id, "❌ Введи число (сумму) или напиши 'всё'.", reply_to=msg_id)
                         continue
 
                     if bet_amount < 10:
@@ -194,7 +196,7 @@ while True:
                         send_msg(peer_id, res_text, reply_to=msg_id)
                     continue
 
-                # Команды
+                # --- КОМАНДЫ ---
                 if text == "/help" or text == "помощь":
                     help_text = ("📖 Команды:\n\n"
                                  "🎰 /казино — меню игр\n"
