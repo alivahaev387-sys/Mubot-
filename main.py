@@ -53,6 +53,13 @@ def update_balance(user_id, amount):
     conn.commit()
     conn.close()
 
+def get_user_name(user_id):
+    try:
+        user_info = vk.users.get(user_ids=user_id)[0]
+        return f"[id{user_id}|{user_info['first_name']} {user_info['last_name']}]"
+    except:
+        return f"[id{user_id}|Игрок {user_id}]"
+
 def send_msg(peer_id, message, keyboard=None, reply_to=None):
     try:
         params = {'peer_id': peer_id, 'message': message, 'random_id': random.randint(1, 2**31 - 1)}
@@ -283,7 +290,8 @@ async def main():
                 user_id, peer_id = msg['from_id'], msg['peer_id']
                 text = msg.get('text', '').strip().lower()
                 is_ls = (peer_id == user_id)
-                balance = get_balance(user_id)
+                
+                get_balance(user_id)
                 
                 clean_text = text.replace("/", "").strip()
                 parts = clean_text.split()
@@ -291,16 +299,28 @@ async def main():
                 reply_to_id = msg.get('id') if not is_ls else None
 
                 if not text and is_ls:
-                    send_msg(peer_id, f"👋 Привет! Твой баланс: {balance}$\nЖми «Работа» или пиши /help", get_main_kb()); continue
+                    send_msg(peer_id, f"👋 Привет! Твой баланс: {get_balance(user_id)}$\nЖми «Работа» или пиши /help", get_main_kb()); continue
                 if not text: continue
 
+                # ИСПРАВЛЕННЫЙ HELP
                 if clean_text in ["help", "помощь", "команды"]:
-                    help_text = "📖 Команды:\n/рулетка [цвет] [ставка]\n/фортуна\n/мины [ставка]\n/rps [фигура] [ставка]\n/duel [сумма] (реплай)\n/профиль\n/топ\n/promo [код]"
+                    help_text = (
+                        "📖 **Игровые команды:**\n\n"
+                        "🎰 /рулетка [цвет/чет] [ставка]\n"
+                        "🎲 /фортуна - Крутить (100$)\n"
+                        "💣 /мины [ставка] - Открывай алмазы\n"
+                        "✂️ /rps [фигура] [ставка]\n"
+                        "⚔️ /duel [сумма] - Вызов (реплай)\n"
+                        "👤 /профиль - Твой баланс (можно реплаем)\n"
+                        "🏆 /топ - Богачи\n"
+                        "🎁 /promo [код] - Активировать\n"
+                        "📜 /промолист - Список активных кодов"
+                    )
                     send_msg(peer_id, help_text, keyboard=get_main_kb() if is_ls else None, reply_to=reply_to_id); continue
 
                 if is_ls:
                     if clean_text in ["начать", "start", "меню", "привет"]:
-                        send_msg(peer_id, f"🎰 Твой баланс: {balance}$\nЖми кнопку или пиши /help", get_main_kb())
+                        send_msg(peer_id, f"🎰 Твой баланс: {get_balance(user_id)}$\nЖми кнопку или пиши /help", get_main_kb())
                     elif text == "💼 работа": send_msg(peer_id, "Выбери работу:", get_work_kb())
                     elif text == "🔙 назад": send_msg(peer_id, "Меню:", get_main_kb())
                     elif text in ["🚕 такси", "🎣 рыбалка", "🏹 охота"]:
@@ -318,8 +338,8 @@ async def main():
                 elif clean_text.startswith("мины"):
                     if len(parts) >= 2:
                         bet_str = parts[1]
-                        bet = balance if bet_str in ["все", "вб", "всё"] else int(bet_str) if bet_str.isdigit() else int(bet_str[:-1]) * 1000 if bet_str.endswith("к") and bet_str[:-1].isdigit() else 0
-                        if bet < 10 or bet > balance: send_msg(peer_id, f"❌ Мин. ставка 10, у тебя {balance}$", reply_to=reply_to_id); continue
+                        bet = get_balance(user_id) if bet_str in ["все", "вб", "всё"] else int(bet_str) if bet_str.isdigit() else int(bet_str[:-1]) * 1000 if bet_str.endswith("к") and bet_str[:-1].isdigit() else 0
+                        if bet < 10 or bet > get_balance(user_id): send_msg(peer_id, f"❌ Мин. ставка 10, у тебя {get_balance(user_id)}$", reply_to=reply_to_id); continue
                         
                         game_id = str(random.randint(10000, 99999))
                         conn = sqlite3.connect(DB_FILE)
@@ -333,7 +353,7 @@ async def main():
                 elif clean_text.startswith("rps"):
                     if len(parts) == 3 and parts[2].isdigit():
                         bet, p_choice = int(parts[2]), parts[1]
-                        if bet > balance or bet < 10: send_msg(peer_id, f"❌ Мин. ставка 10, у тебя {balance}$", reply_to=reply_to_id)
+                        if bet > get_balance(user_id) or bet < 10: send_msg(peer_id, f"❌ Мин. ставка 10, у тебя {get_balance(user_id)}$", reply_to=reply_to_id)
                         elif p_choice not in ["камень", "ножницы", "бумага"]: send_msg(peer_id, "❌ Выбери: камень, ножницы или бумага.", reply_to=reply_to_id)
                         else:
                             b_choice = random.choice(["камень", "ножницы", "бумага"])
@@ -352,7 +372,7 @@ async def main():
                             target_id = msg['reply_message']['from_id']
                             if target_id == user_id: send_msg(peer_id, "❌ Нельзя дуэлиться с собой.", reply_to=reply_to_id)
                             else:
-                                send_msg(peer_id, f"⚔️ [id{user_id}|Игрок] вызывает [id{target_id}|Игрока] на дуэль на {bet}$!\nЦель, напиши /принять.", reply_to=reply_to_id)
+                                send_msg(peer_id, f"⚔️ {get_user_name(user_id)} вызывает {get_user_name(target_id)} на дуэль на {bet}$!\nЦель, напиши /принять.", reply_to=reply_to_id)
                                 conn = sqlite3.connect(DB_FILE)
                                 c = conn.cursor()
                                 c.execute("REPLACE INTO duels (peer_id, challenger, target, bet) VALUES (?, ?, ?, ?)", (str(peer_id), str(user_id), str(target_id), bet))
@@ -374,13 +394,22 @@ async def main():
                                 winner = random.choice([user_id, int(challenger)])
                                 loser = int(challenger) if winner == user_id else user_id
                                 update_balance(winner, bet); update_balance(loser, -bet)
-                                send_msg(peer_id, f"⚔️ Дуэль окончена! Победил [id{winner}|Игрок] и забрал {bet}$!", reply_to=reply_to_id)
+                                send_msg(peer_id, f"⚔️ Дуэль окончена! Победил {get_user_name(winner)} и забрал {bet}$!", reply_to=reply_to_id)
                             c.execute("DELETE FROM duels WHERE peer_id = ?", (str(peer_id),))
                             conn.commit()
                     conn.close()
 
                 elif clean_text in ["профиль", "баланс"]:
-                    send_msg(peer_id, f"👤 Твой профиль:\n💰 Баланс: {balance}$\n🆔 ID: {user_id}", keyboard=get_main_kb() if is_ls else None, reply_to=reply_to_id)
+                    target_id = user_id
+                    if msg.get('reply_message'):
+                        target_id = msg['reply_message']['from_id']
+                    
+                    if target_id == user_id:
+                        send_msg(peer_id, f"👤 Твой профиль:\n💰 Баланс: {get_balance(user_id)}$\n🆔 ID: {user_id}", keyboard=get_main_kb() if is_ls else None, reply_to=reply_to_id)
+                    else:
+                        target_name = get_user_name(target_id)
+                        target_bal = get_balance(target_id)
+                        send_msg(peer_id, f"👤 Профиль {target_name}:\n💰 Баланс: {target_bal}$\n🆔 ID: {target_id}", reply_to=reply_to_id)
                 
                 elif clean_text == "топ":
                     conn = sqlite3.connect(DB_FILE)
@@ -388,31 +417,40 @@ async def main():
                     c.execute("SELECT user_id, balance FROM users ORDER BY balance DESC LIMIT 5")
                     rows = c.fetchall()
                     conn.close()
-                    top_text = "🏆 Топ 5:\n" + "\n".join([f"{i}. [id{r[0]}|Игрок] — {r[1]}$" for i, r in enumerate(rows, 1)])
+                    
+                    top_text = "🏆 Топ 5:\n"
+                    for i, r in enumerate(rows, 1):
+                        u_id = r[0]
+                        u_bal = r[1]
+                        u_name = get_user_name(u_id)
+                        top_text += f"{i}. {u_name} — {u_bal}$\n"
+                    
                     send_msg(peer_id, top_text, keyboard=get_main_kb() if is_ls else None, reply_to=reply_to_id)
 
+                # ВЫДАЧА ВСЕМ
                 elif clean_text.startswith("выдать") and user_id == ADMIN_ID:
                     try:
                         if len(parts) >= 3 and parts[1] == "all":
                             amount = int(parts[2])
-                            conn = sqlite3.connect(DB_FILE)
-                            c = conn.cursor()
-                            c.execute("SELECT user_id FROM users")
-                            users = c.fetchall()
-                            conn.close()
-                            for u in users:
-                                update_balance(u[0], amount)
-                            send_msg(peer_id, f"✅ Выдано {amount}$ всем участникам!", reply_to=reply_to_id)
+                            members = vk.messages.getConversationMembers(peer_id=peer_id)['items']
+                            
+                            for member in members:
+                                if member['member_id'] > 0:
+                                    update_balance(member['member_id'], amount)
+                                    
+                            send_msg(peer_id, f"✅ Выдано {amount}$ всем участникам беседы!", reply_to=reply_to_id)
+                            
                         elif len(parts) == 2 and parts[1].isdigit() and msg.get('reply_message'):
                             amount = int(parts[1])
                             target_id = msg['reply_message']['from_id']
                             update_balance(target_id, amount)
-                            send_msg(peer_id, f"✅ Выдано {amount}$ игроку [id{target_id}|Игрок]!", reply_to=reply_to_id)
+                            send_msg(peer_id, f"✅ Выдано {amount}$ игроку {get_user_name(target_id)}!", reply_to=reply_to_id)
                         else:
                             send_msg(peer_id, "❌ Формат: /выдать all 5000 или ответом /выдать 5000", reply_to=reply_to_id)
                     except Exception as e:
                         print(f"Ошибка выдачи: {e}")
 
+                # ПРОМОЛИСТ
                 elif clean_text == "промолист":
                     conn = sqlite3.connect(DB_FILE)
                     c = conn.cursor()
@@ -428,6 +466,7 @@ async def main():
                             promo_list += f"▪️ `{r[0]}` — {r[1]}$ (Использовано: {used_count}/{r[2]})\n"
                         send_msg(peer_id, promo_list, reply_to=reply_to_id)
 
+                # СОЗДАНИЕ ПРОМОКОДА (только владелец)
                 elif (clean_text.startswith("создать") or clean_text.startswith("промокод")) and user_id == ADMIN_ID:
                     try:
                         if len(parts) == 3:
@@ -449,6 +488,7 @@ async def main():
                         print(f"Ошибка создания промо: {e}")
                         send_msg(peer_id, "❌ Ошибка. Пример: /промокод beseda 5000", reply_to=reply_to_id)
                 
+                # АКТИВАЦИЯ ПРОМОКОДА
                 elif clean_text.startswith("promo"):
                     try:
                         code = parts[1]
