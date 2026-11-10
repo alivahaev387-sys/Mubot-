@@ -541,7 +541,7 @@ async def main():
                     
                     send_msg(peer_id, top_text, keyboard=get_main_kb() if is_ls else None, reply_to=reply_to_id)
 
-                # ЧИСТИТЬ ПРОМОКОДЫ (НОВАЯ КОМАНДА /чиститьп)
+                # ЧИСТИТЬ ПРОМОКОДЫ (СТАВИМ ПЕРВОЙ В ЦЕПОЧКЕ)
                 elif clean_text == "чиститьп" and user_id == ADMIN_ID:
                     try:
                         conn = sqlite3.connect(DB_FILE)
