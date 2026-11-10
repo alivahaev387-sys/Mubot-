@@ -535,4 +535,23 @@ async def main():
                             conn.close()
                             continue
                             
-                        if str(user_id
+                        if str(user_id) in used_by:
+                            send_msg(peer_id, "❌ Ты уже активировал этот промокод!", reply_to=reply_to_id)
+                            conn.close()
+                            continue
+                        
+                        used_by.append(str(user_id))
+                        c.execute("UPDATE promos SET used_by = ? WHERE code = ?", (",".join(used_by), code))
+                        conn.commit()
+                        update_balance(user_id, amount)
+                        send_msg(peer_id, f"✅ Промокод активирован! +{amount}$\nОсталось активаций: {limit - len(used_by)}", reply_to=reply_to_id)
+                        conn.close()
+                    except Exception as e: 
+                        print(f"Ошибка промо: {e}")
+                        send_msg(peer_id, "❌ Формат: /promo код", reply_to=reply_to_id)
+
+        except Exception as e:
+            print(f"⚠️ Ошибка в цикле: {e}")
+
+if __name__ == "__main__":
+    asyncio.run(main())
