@@ -6,7 +6,7 @@ import json, random, time, os
 TOKEN = "vk1.a.n-y1VnQMFI87cAGH7zXHwYy6LncLM_UuAaCihe6dlWxUBLGwS8no-KjRmFrA9zmwy-STfP7f2VZOHArq1-WVKYVRUA3H1F3-pO5gtXRxEziw3u3st-dTYHNiK_an2ZcbUIpXYNy98HHTGQv12wFtMLsSASQ0kO0ke0B0DRsXc7hn-LQrYcpbu54a_kQmP7dxBO5a8gTmuS9Dn9LH7oMLfE6G6_GPJZxJAgkwzptCnWw"
 GROUP_ID = 243089386
 ADMIN_ID = 200005093141 
-FORTUNA_CD = 600  # Кулдаун фортуны в секундах (10 минут = 600 сек)
+FORTUNA_CD = 600  # 10 минут
 
 vk_session = vk_api.VkApi(token=TOKEN)
 longpoll = VkBotLongPoll(vk_session, GROUP_ID)
@@ -48,7 +48,7 @@ def send_msg(peer_id, message, keyboard=None, reply_to=None):
     except Exception as e:
         print(f"Ошибка отправки: {e}")
 
-# Кнопки ТОЛЬКО для работы
+# ===== КЛАВИАТУРЫ =====
 def get_work_kb():
     return json.dumps({
         "one_time": False, 
@@ -67,6 +67,14 @@ def get_main_kb():
         ]
     }, ensure_ascii=False)
 
+def get_sub_kb():
+    return json.dumps({
+        "inline": True,
+        "buttons": [
+            [{"action": {"type": "open_link", "link": f"https://vk.com/public{GROUP_ID}", "label": "📢 Подписаться"}}]
+        ]
+    }, ensure_ascii=False)
+
 # ===== ЛОГИКА ИГР =====
 def process_roulette(user_id, peer_id, choice, bet_str, reply_to=None, is_ls=False):
     balance = get_balance(user_id)
@@ -76,7 +84,7 @@ def process_roulette(user_id, peer_id, choice, bet_str, reply_to=None, is_ls=Fal
     elif bet_str_clean.isdigit(): bet = int(bet_str_clean)
     elif "к" in bet_str_clean and bet_str_clean.replace("к", "").isdigit(): bet = int(bet_str_clean.replace("к", "")) * 1000
     else:
-        send_msg(peer_id, "❌ Неверная ставка. Введи число, '1кк' или 'вб'", reply_to=reply_to); return
+        send_msg(peer_id, "❌ Неверная ставка.", reply_to=reply_to); return
 
     if bet < 10 and bet != balance:
         send_msg(peer_id, "❌ Мин. ставка 10$", reply_to=reply_to); return
@@ -121,12 +129,10 @@ def process_roulette(user_id, peer_id, choice, bet_str, reply_to=None, is_ls=Fal
     kb = get_main_kb() if is_ls else None
     send_msg(peer_id, msg, keyboard=kb, reply_to=reply_to)
 
-# ===== ФОРТУНА С КУЛДАУНОМ =====
 def process_fortune(user_id, peer_id, reply_to=None, is_ls=False):
     uid = str(user_id)
     current_time = int(time.time())
     
-    # Проверка кулдауна
     last_use = db["fortune_cd"].get(uid, 0)
     if current_time - last_use < FORTUNA_CD:
         remaining = FORTUNA_CD - (current_time - last_use)
@@ -141,7 +147,6 @@ def process_fortune(user_id, peer_id, reply_to=None, is_ls=False):
     if balance < 100: 
         send_msg(peer_id, "❌ Фортуна стоит 100$. У тебя мало денег.", reply_to=reply_to); return
     
-    # Списываем 100 и записываем время
     update_balance(user_id, -100)
     db["fortune_cd"][uid] = current_time
     save_db(db)
@@ -155,7 +160,7 @@ def process_fortune(user_id, peer_id, reply_to=None, is_ls=False):
     send_msg(peer_id, msg, keyboard=kb, reply_to=reply_to)
 
 # ===== ЗАПУСК =====
-print("БОТ ЗАПУЩЕН! БЕЗ КНОПОК В БЕСЕДАХ.")
+print("БОТ ЗАПУЩЕН! ПРОВЕРКА ПОДПИСКИ ВКЛЮЧЕНА.")
 
 while True:
     try:
@@ -185,7 +190,7 @@ while True:
                         "⚔️ /duel [сумма] - Вызов (реплаем)\n"
                         "👤 /профиль - Твой баланс\n"
                         "🏆 /топ - Богачи\n"
-                        "🎁 /promo [код] - Активировать"
+                        "🎁 /promo [код] - Активировать (Нужна подписка!)"
                     )
                     kb = get_main_kb() if is_ls else None
                     send_msg(peer_id, help_text, keyboard=kb, reply_to=msg.get('id'))
@@ -287,9 +292,25 @@ while True:
                     except:
                         send_msg(peer_id, "❌ Формат: /промокод название сумма", reply_to=msg.get('id'))
                 
+                # === АКТИВАЦИЯ ПРОМОКОДА С ПРОВЕРКОЙ ПОДПИСКИ ===
                 elif text_lower.startswith(("/promo", "promo")):
                     try:
                         code = parts[1]
+                        
+                        # Проверяем подписку через ВК API
+                        try:
+                            is_member = vk.groups.isMember(group_id=GROUP_ID, user_id=user_id)
+                        except Exception as e:
+                            print(f"Ошибка проверки подписки: {e}")
+                            is_member = 0 # Если ошибка (нет прав), считаем, что не подписан
+                        
+                        if is_member == 0:
+                            msg = "❌ Чтобы активировать промокод, вы должны быть подписаны на наше сообщество!"
+                            # В ЛС и в беседе прикрепляем инлайн-кнопку подписки
+                            send_msg(peer_id, msg, keyboard=get_sub_kb(), reply_to=msg.get('id'))
+                            continue
+                            
+                        # Если подписан - активируем
                         if code in db["promos"]:
                             reward = db["promos"][code]
                             del db["promos"][code]
