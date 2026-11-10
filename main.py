@@ -8,7 +8,7 @@ TOKEN = "vk1.a.n-y1VnQMFI87cAGH7zXHwYy6LncLM_UuAaCihe6dlWxUBLGwS8no-KjRmFrA9zmwy
 GROUP_ID = 243089386
 ADMIN_ID = 200005093141 
 FORTUNA_CD = 600
-BONUS_CD = 600 # 10 минут (в секундах)
+BONUS_CD = 600 
 
 DATA_DIR = "/app/data"
 if not os.path.exists(DATA_DIR):
@@ -303,13 +303,14 @@ async def main():
                     send_msg(peer_id, f"👋 Привет! Твой баланс: {get_balance(user_id)}$\nЖми «Работа» или пиши /help", get_main_kb()); continue
                 if not text: continue
 
+                # ОБНОВЛЕННЫЙ HELP (Добавлен БОНУС)
                 if clean_text in ["help", "помощь", "команды"]:
                     help_text = (
                         "📖 **Игровые команды:**\n\n"
                         "🎰 /рулетка [цвет/чет] [ставка]\n"
                         "🎲 /фортуна - Крутить (100$)\n"
                         "💣 /мины [ставка] - Открывай алмазы\n"
-                        "🎁 /бонус - Получить бонус\n"
+                        "🎁 /бонус - Получить бонус (раз в 10 мин)\n"
                         "✂️ /rps [фигура] [ставка]\n"
                         "⚔️ /duel [сумма] - Вызов (реплай)\n"
                         "👤 /профиль - Твой баланс (можно реплаем)\n"
@@ -319,7 +320,7 @@ async def main():
                     )
                     send_msg(peer_id, help_text, keyboard=get_main_kb() if is_ls else None, reply_to=reply_to_id); continue
 
-                # БОНУС
+                # КОМАНДА БОНУС
                 elif clean_text == "бонус":
                     uid = str(user_id)
                     current_time = int(time.time())
