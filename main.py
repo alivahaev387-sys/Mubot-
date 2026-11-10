@@ -84,6 +84,7 @@ def get_sub_kb():
         ]
     }, ensure_ascii=False)
 
+# Клавиатура выбора количества мин
 def get_mines_count_kb(game_id):
     kb = {"inline": True, "buttons": []}
     row = []
@@ -95,6 +96,7 @@ def get_mines_count_kb(game_id):
     if row: kb["buttons"].append(row)
     return json.dumps(kb, ensure_ascii=False)
 
+# Клавиатура игрового поля
 def get_mines_field_kb(game):
     kb = {"inline": True, "buttons": []}
     row = []
@@ -111,6 +113,7 @@ def get_mines_field_kb(game):
             kb["buttons"].append(row)
             row = []
             
+    # Кнопка забрать
     kb["buttons"].append([{"action": {"type": "callback", "label": "💰 Забрать", "payload": json.dumps({"cmd": "mines_cashout", "game_id": game["id"]})}, "color": "positive"}])
     return json.dumps(kb, ensure_ascii=False)
 
@@ -199,13 +202,13 @@ def process_fortune(user_id, peer_id, reply_to=None, is_ls=False):
     send_msg(peer_id, msg, keyboard=kb, reply_to=reply_to)
 
 # ===== ЗАПУСК =====
-print("БОТ ЗАПУЩЕН! МИНЫ С ИНТЕРФЕЙСОМ.")
+print("БОТ ЗАПУЩЕН! МИНЫ ГОТОВЫ.")
 
 while True:
     try:
         for event in longpoll.listen():
             
-            # ОБРАБОТКА НАЖАТИЙ КНОПОК МИН
+            # ОБРАБОТКА КНОПОК
             if event.type == VkBotEventType.MESSAGE_EVENT:
                 payload = event.object.payload
                 peer_id = event.object.peer_id
@@ -290,7 +293,7 @@ while True:
                         vk.messages.sendMessageEventAnswer(event_id=event_id, user_id=user_id, peer_id=peer_id, event_data=json.dumps({"type": "show_snackbar", "text": "💰 Деньги у вас!"}))
                 continue
 
-            # ТЕКСТОВЫЕ СООБЩЕНИЯ
+            # ТЕКСТ
             if event.type == VkBotEventType.MESSAGE_NEW:
                 msg = event.object.message
                 user_id = msg['from_id']
@@ -335,7 +338,6 @@ while True:
                         update_balance(user_id, earned)
                         send_msg(peer_id, f"✅ Ты заработал {earned}$!\n💰 Баланс: {get_balance(user_id)}$", get_work_kb())
 
-                # МИНЫ
                 elif text_lower.startswith(("/мины", "мины")):
                     if len(parts) >= 2:
                         bet_str = parts[1]
@@ -357,7 +359,6 @@ while True:
                     else:
                         send_msg(peer_id, "❌ Формат: /мины [ставка] (Пример: /мины 5000)", reply_to=msg.get('id'))
 
-                # РУЛЕТКА
                 elif text_lower.startswith(("/рулетка", "рулетка")):
                     if len(parts) >= 3:
                         bet_str = parts[-1]
@@ -366,11 +367,9 @@ while True:
                     else:
                         send_msg(peer_id, "❌ Формат: /рулетка красное 500", reply_to=msg.get('id'))
                 
-                # ФОРТУНА
                 elif text_lower.startswith(("/фортуна", "фортуна")):
                     process_fortune(user_id, peer_id, reply_to=msg.get('id'), is_ls=is_ls)
                 
-                # RPS
                 elif text_lower.startswith(("/rps", "rps")):
                     if len(parts) == 3 and parts[2].isdigit():
                         bet = int(parts[2])
@@ -394,7 +393,6 @@ while True:
                     else:
                         send_msg(peer_id, "❌ Формат: /rps камень 500", reply_to=msg.get('id'))
 
-                # ДУЭЛИ
                 elif text_lower.startswith(("/duel", "duel")):
                     if len(parts) == 2 and parts[1].isdigit():
                         bet = int(parts[1])
@@ -426,19 +424,16 @@ while True:
                         del db["active_duel"]
                         save_db(db)
 
-                # ПРОФИЛЬ
                 elif text_lower in ["/профиль", "профиль"]:
                     kb = get_main_kb() if is_ls else None
                     send_msg(peer_id, f"👤 Твой профиль:\n💰 Баланс: {balance}$\n🆔 ID: {user_id}", keyboard=kb, reply_to=msg.get('id'))
                 
-                # ТОП
                 elif text_lower in ["/топ", "топ"]:
                     top = sorted(db["users"].items(), key=lambda x: x[1], reverse=True)[:5]
                     top_text = "🏆 Топ 5:\n" + "\n".join([f"{i}. [id{u}|Игрок] — {b}$" for i, (u, b) in enumerate(top, 1)])
                     kb = get_main_kb() if is_ls else None
                     send_msg(peer_id, top_text, keyboard=kb, reply_to=msg.get('id'))
 
-                # ПРОМОКОДЫ
                 elif text_lower.startswith(("/создать", "создать", "/промокод")) and user_id == ADMIN_ID:
                     try:
                         _, code, amount, limit = parts
