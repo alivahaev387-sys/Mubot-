@@ -19,8 +19,9 @@ def load_db():
         with open(DB_FILE, "r", encoding="utf-8") as f: 
             data = json.load(f)
             if "fortune_cd" not in data: data["fortune_cd"] = {}
+            if "active_mines" not in data: data["active_mines"] = {}
             return data
-    return {"users": {}, "promos": {}, "active_chats": [], "active_duel": {}, "fortune_cd": {}}
+    return {"users": {}, "promos": {}, "active_chats": [], "active_duel": {}, "fortune_cd": {}, "active_mines": {}}
 
 def save_db(data):
     with open(DB_FILE, "w", encoding="utf-8") as f: json.dump(data, f, ensure_ascii=False, indent=4)
@@ -83,7 +84,6 @@ def get_sub_kb():
         ]
     }, ensure_ascii=False)
 
-# Клавиатура выбора количества мин
 def get_mines_count_kb(game_id):
     kb = {"inline": True, "buttons": []}
     row = []
@@ -95,18 +95,15 @@ def get_mines_count_kb(game_id):
     if row: kb["buttons"].append(row)
     return json.dumps(kb, ensure_ascii=False)
 
-# Клавиатура самого поля 3x3
 def get_mines_field_kb(game):
     kb = {"inline": True, "buttons": []}
     row = []
     for i in range(1, 10):
-        # Если клетка уже открыта
         if i in game["opened"]:
             if i in game["mines"]:
                 row.append({"action": {"type": "callback", "label": "💥", "payload": "{}"}, "color": "negative"})
             else:
                 row.append({"action": {"type": "callback", "label": "💎", "payload": "{}"}, "color": "positive"})
-        # Если клетка закрыта
         else:
             row.append({"action": {"type": "callback", "label": str(i), "payload": json.dumps({"cmd": "mines_click", "game_id": game["id"], "cell": i})}, "color": "secondary"})
         
@@ -114,11 +111,10 @@ def get_mines_field_kb(game):
             kb["buttons"].append(row)
             row = []
             
-    # Кнопка забрать
     kb["buttons"].append([{"action": {"type": "callback", "label": "💰 Забрать", "payload": json.dumps({"cmd": "mines_cashout", "game_id": game["id"]})}, "color": "positive"}])
     return json.dumps(kb, ensure_ascii=False)
 
-# ===== ЛОГИКА ИГР =====
+# ===== ИГРЫ =====
 def process_roulette(user_id, peer_id, choice, bet_str, reply_to=None, is_ls=False):
     balance = get_balance(user_id)
     bet_str_clean = bet_str.lower().replace("ё", "е")
@@ -203,21 +199,19 @@ def process_fortune(user_id, peer_id, reply_to=None, is_ls=False):
     send_msg(peer_id, msg, keyboard=kb, reply_to=reply_to)
 
 # ===== ЗАПУСК =====
-print("БОТ ЗАПУЩЕН! МИНЫ ДОБАВЛЕНЫ.")
+print("БОТ ЗАПУЩЕН! МИНЫ С ИНТЕРФЕЙСОМ.")
 
 while True:
     try:
         for event in longpoll.listen():
             
-            # ОБРАБОТКА НАЖАТИЙ КНОПОК (ДЛЯ МИН)
+            # ОБРАБОТКА НАЖАТИЙ КНОПОК МИН
             if event.type == VkBotEventType.MESSAGE_EVENT:
                 payload = event.object.payload
                 peer_id = event.object.peer_id
                 user_id = event.object.user_id
                 event_id = event.object.event_id
                 cm_id = event.object.conversation_message_id
-                
-                if "active_mines" not in db: db["active_mines"] = {}
                 
                 if payload.get("cmd") == "mines_set":
                     game_id = payload["game_id"]
@@ -227,13 +221,11 @@ while True:
                         game = db["active_mines"][game_id]
                         if game["user_id"] != user_id: continue
                         
-                        # Генерируем мины
                         cells = list(range(1, 10))
                         game["mines"] = random.sample(cells, mine_count)
                         game["opened"] = []
                         game["multiplier"] = 1.0
                         
-                        # Меняем сообщение на игровое поле
                         msg_text = f"💣 Мины\nСтавка: {game['bet']}$ | Мин: {mine_count} из 9\n\nВыбери клетку, чтобы открыть алмаз 💎"
                         edit_msg(peer_id, cm_id, msg_text, get_mines_field_kb(game))
                         save_db(db)
@@ -251,10 +243,8 @@ while True:
                         
                         game["opened"].append(cell)
                         
-                        # ПРОИГРЫШ
                         if cell in game["mines"]:
                             update_balance(user_id, -game["bet"])
-                            # Открываем все мины на поле
                             game["opened"] = list(range(1, 10))
                             msg_text = f"💥 Вы попали на мину!\n\nПроигрыш: -{game['bet']}$\nБаланс: {get_balance(user_id)}$"
                             edit_msg(peer_id, cm_id, msg_text, get_mines_field_kb(game))
@@ -263,19 +253,16 @@ while True:
                             vk.messages.sendMessageEventAnswer(event_id=event_id, user_id=user_id, peer_id=peer_id, event_data=json.dumps({"type": "show_snackbar", "text": "💥 БУМ! Вы проиграли."}))
                             continue
                         
-                        # СЧИТАЕМ КОЭФФИЦИЕНТ (Чем больше открыто, тем выше)
                         mines_count = len(game["mines"])
                         opened_count = len(game["opened"])
                         
-                        # Простая математика для коэффициента
                         multiplier = 1.0
                         for i in range(opened_count):
                             multiplier *= (9 - i) / (9 - mines_count - i)
                         
-                        game["multiplier"] = round(multiplier * 0.95, 2) # 5% комиссия казино
+                        game["multiplier"] = round(multiplier * 0.95, 2)
                         win_amount = int(game["bet"] * game["multiplier"])
                         
-                        # Обновляем сообщение
                         msg_text = (
                             f"💣 Мины\nСтавка: {game['bet']}$ | Мин: {mines_count} из 9\n\n"
                             f"Открыто алмазов: {opened_count} | Коэф: x{game['multiplier']}\n"
@@ -294,17 +281,16 @@ while True:
                         if game["user_id"] != user_id: continue
                         
                         win_amount = int(game["bet"] * game["multiplier"])
-                        update_balance(user_id, win_amount) # Возвращаем ставку + выигрыш
+                        update_balance(user_id, win_amount)
                         
                         msg_text = f"💰 Вы забрали выигрыш: {win_amount}$!\nБаланс: {get_balance(user_id)}$"
-                        # Убираем кнопки после вывода
                         edit_msg(peer_id, cm_id, msg_text, None) 
                         del db["active_mines"][game_id]
                         save_db(db)
                         vk.messages.sendMessageEventAnswer(event_id=event_id, user_id=user_id, peer_id=peer_id, event_data=json.dumps({"type": "show_snackbar", "text": "💰 Деньги у вас!"}))
                 continue
 
-            # ОБРАБОТКА ТЕКСТОВЫХ СООБЩЕНИЙ
+            # ТЕКСТОВЫЕ СООБЩЕНИЯ
             if event.type == VkBotEventType.MESSAGE_NEW:
                 msg = event.object.message
                 user_id = msg['from_id']
@@ -331,7 +317,7 @@ while True:
                         "⚔️ /duel [сумма] - Вызов (реплаем)\n"
                         "👤 /профиль - Твой баланс\n"
                         "🏆 /топ - Богачи\n"
-                        "🎁 /promo [код] - Активировать (Нужна подписка!)"
+                        "🎁 /promo [код] - Активировать"
                     )
                     kb = get_main_kb() if is_ls else None
                     send_msg(peer_id, help_text, keyboard=kb, reply_to=msg.get('id'))
@@ -349,7 +335,7 @@ while True:
                         update_balance(user_id, earned)
                         send_msg(peer_id, f"✅ Ты заработал {earned}$!\n💰 Баланс: {get_balance(user_id)}$", get_work_kb())
 
-                # === ЗАПУСК ИГРЫ МИНЫ ===
+                # МИНЫ
                 elif text_lower.startswith(("/мины", "мины")):
                     if len(parts) >= 2:
                         bet_str = parts[1]
@@ -362,9 +348,7 @@ while True:
                         if bet < 10 or bet > balance:
                             send_msg(peer_id, f"❌ Мин. ставка 10, у тебя {balance}$", reply_to=msg.get('id')); continue
                         
-                        # Создаем игру
                         game_id = str(random.randint(10000, 99999))
-                        if "active_mines" not in db: db["active_mines"] = {}
                         db["active_mines"][game_id] = {"id": game_id, "user_id": user_id, "bet": bet, "mines": [], "opened": [], "multiplier": 1.0}
                         save_db(db)
                         
@@ -373,6 +357,7 @@ while True:
                     else:
                         send_msg(peer_id, "❌ Формат: /мины [ставка] (Пример: /мины 5000)", reply_to=msg.get('id'))
 
+                # РУЛЕТКА
                 elif text_lower.startswith(("/рулетка", "рулетка")):
                     if len(parts) >= 3:
                         bet_str = parts[-1]
@@ -381,9 +366,11 @@ while True:
                     else:
                         send_msg(peer_id, "❌ Формат: /рулетка красное 500", reply_to=msg.get('id'))
                 
+                # ФОРТУНА
                 elif text_lower.startswith(("/фортуна", "фортуна")):
                     process_fortune(user_id, peer_id, reply_to=msg.get('id'), is_ls=is_ls)
                 
+                # RPS
                 elif text_lower.startswith(("/rps", "rps")):
                     if len(parts) == 3 and parts[2].isdigit():
                         bet = int(parts[2])
@@ -407,6 +394,7 @@ while True:
                     else:
                         send_msg(peer_id, "❌ Формат: /rps камень 500", reply_to=msg.get('id'))
 
+                # ДУЭЛИ
                 elif text_lower.startswith(("/duel", "duel")):
                     if len(parts) == 2 and parts[1].isdigit():
                         bet = int(parts[1])
@@ -438,16 +426,19 @@ while True:
                         del db["active_duel"]
                         save_db(db)
 
+                # ПРОФИЛЬ
                 elif text_lower in ["/профиль", "профиль"]:
                     kb = get_main_kb() if is_ls else None
                     send_msg(peer_id, f"👤 Твой профиль:\n💰 Баланс: {balance}$\n🆔 ID: {user_id}", keyboard=kb, reply_to=msg.get('id'))
                 
+                # ТОП
                 elif text_lower in ["/топ", "топ"]:
                     top = sorted(db["users"].items(), key=lambda x: x[1], reverse=True)[:5]
                     top_text = "🏆 Топ 5:\n" + "\n".join([f"{i}. [id{u}|Игрок] — {b}$" for i, (u, b) in enumerate(top, 1)])
                     kb = get_main_kb() if is_ls else None
                     send_msg(peer_id, top_text, keyboard=kb, reply_to=msg.get('id'))
 
+                # ПРОМОКОДЫ
                 elif text_lower.startswith(("/создать", "создать", "/промокод")) and user_id == ADMIN_ID:
                     try:
                         _, code, amount, limit = parts
