@@ -62,7 +62,7 @@ def get_work_kb():
         ]
     }, ensure_ascii=False)
 
-print("БОТ ЗАПУЩЕН! РУЛЕТКА ГОТОВА.")
+print("БОТ ЗАПУЩЕН! ЖДУ КОМАНД...")
 
 while True:
     try:
@@ -71,7 +71,8 @@ while True:
                 msg = event.object.message
                 user_id = msg['from_id']
                 peer_id = msg['peer_id']
-                text = msg.get('text', '').strip()
+                # Убираем все лишние пробелы и невидимые символы
+                text = msg.get('text', '').strip().replace('\n', ' ')
                 text_lower = text.lower()
                 is_ls = (peer_id == user_id)
                 
@@ -82,85 +83,59 @@ while True:
                 if not text: continue
                 balance = get_balance(user_id)
 
-                # === БЕСЕДЫ ===
-                if not is_ls:
-                    if text_lower in ["/help", "/start"]:
-                        send_msg(peer_id, "📖 Команды:\n/рулетка [на что] [ставка]\n/работа\n/профиль\n/топ", reply_to=msg.get('conversation_message_id'))
-                    elif text_lower.startswith("/рулетка"):
+                # === ЛС ===
+                if is_ls:
+                    if text_lower in ["начать", "start", "меню", "привет"]:
+                        send_msg(peer_id, f"🎰 Твой баланс: {balance}$\nВыбирай действие 👇", get_main_kb())
+                    
+                    elif text == "💼 Работа":
+                        send_msg(peer_id, "Выбери работу:", get_work_kb())
+                    elif text == "🔙 Назад":
+                        send_msg(peer_id, "Меню:", get_main_kb())
+                    elif text in ["🚕 Такси", "🎣 Рыбалка", "🏹 Охота"]:
+                        earned = random.randint(200, 800)
+                        update_balance(user_id, earned)
+                        send_msg(peer_id, f"✅ Ты заработал {earned}$!\n💰 Баланс: {get_balance(user_id)}$", get_work_kb())
+                    
+                    elif text == "🎰 Рулетка" or text_lower == "рулетка":
+                        rules_text = (
+                            "Как играть в рулетку ❓\n\n"
+                            "«Рулетка [на что ставишь] [ставка]»\n"
+                            "▪️ Число от 0 до 36 (x36)\n"
+                            "▪️ Чет (x2)\n"
+                            "▪️ Нечет (x2)\n"
+                            "▪️ Красное (x2)\n"
+                            "▪️ Черное (x2)\n"
+                            "▪️ 1-12 (x3)\n"
+                            "▪️ 13-24 (x3)\n"
+                            "▪️ 25-36 (x3)\n"
+                            "▪️ 1-18 (x2)\n"
+                            "▪️ 19-36 (x2)\n\n"
+                            "⚠️ Чтобы поставить весь баланс, там где ставка пиши «вб»\n\n"
+                            "Пример — «Рулетка чет 1кк»"
+                        )
+                        send_msg(peer_id, rules_text, get_main_kb())
+
+                    # Обработка команды "Рулетка ..."
+                    elif text_lower.startswith("рулетка "):
                         parts = text_lower.split()
+                        print(f"DEBUG: Получена команда рулетки: {parts}") # Проверка в логах
+                        
                         if len(parts) >= 3:
                             bet_str = parts[-1]
                             choice = " ".join(parts[1:-1])
-                            process_roulette(user_id, peer_id, choice, bet_str, msg.get('conversation_message_id'))
-                        else:
-                            send_msg(peer_id, "❌ Формат: /рулетка красное 500 или /рулетка чет вб", reply_to=msg.get('conversation_message_id'))
-                    elif text_lower == "/работа":
-                        earned = random.randint(500, 1500)
-                        update_balance(user_id, earned)
-                        send_msg(peer_id, f"💼 Ты заработал {earned}$! Баланс: {get_balance(user_id)}$", reply_to=msg.get('conversation_message_id'))
-                    elif text_lower == "/профиль":
-                        send_msg(peer_id, f"👤 Твой баланс: {balance}$", reply_to=msg.get('conversation_message_id'))
-                    elif text_lower == "/топ":
-                        top = sorted(db["users"].items(), key=lambda x: x[1], reverse=True)[:5]
-                        top_text = "🏆 Топ 5:\n" + "\n".join([f"{i}. [id{u}|Игрок] — {b}$" for i, (u, b) in enumerate(top, 1)])
-                        send_msg(peer_id, top_text, reply_to=msg.get('conversation_message_id'))
-                    continue
-
-                # === ЛС ===
-                if text_lower in ["начать", "start", "меню", "привет"]:
-                    send_msg(peer_id, f"🎰 Твой баланс: {balance}$\nВыбирай действие 👇", get_main_kb())
-                
-                elif text == "💼 Работа":
-                    send_msg(peer_id, "Выбери работу:", get_work_kb())
-                elif text == "🔙 Назад":
-                    send_msg(peer_id, "Меню:", get_main_kb())
-                elif text in ["🚕 Такси", "🎣 Рыбалка", "🏹 Охота"]:
-                    earned = random.randint(200, 800)
-                    update_balance(user_id, earned)
-                    send_msg(peer_id, f"✅ Ты заработал {earned}$!\n💰 Баланс: {get_balance(user_id)}$", get_work_kb())
-                
-                # === ПРАВИЛА РУЛЕТКИ ===
-                elif text == "🎰 Рулетка" or text_lower == "рулетка":
-                    rules_text = (
-                        "Как играть в рулетку ❓\n\n"
-                        "«Рулетка [на что ставишь] [ставка]»\n"
-                        "▪️ Число от 0 до 36 (x36)\n"
-                        "▪️ Чет (x2)\n"
-                        "▪️ Нечет (x2)\n"
-                        "▪️ Красное (x2)\n"
-                        "▪️ Черное (x2)\n"
-                        "▪️ 1-12 (x3)\n"
-                        "▪️ 13-24 (x3)\n"
-                        "▪️ 25-36 (x3)\n"
-                        "▪️ 1-18 (x2)\n"
-                        "▪️ 19-36 (x2)\n\n"
-                        "⚠️ Чтобы поставить весь баланс, там где ставка пиши «вб»\n\n"
-                        "Пример — «Рулетка чет 1кк»"
-                    )
-                    send_msg(peer_id, rules_text, get_main_kb())
-
-                # === ЗАПУСК РУЛЕТКИ НАПРЯМУЮ ===
-                elif text_lower.startswith("рулетка "):
-                    parts = text_lower.split()
-                    if len(parts) >= 3:
-                        bet_str = parts[-1]
-                        choice = " ".join(parts[1:-1])
-                        process_roulette(user_id, peer_id, choice, bet_str)
-                    else:
-                        # Если написали просто "Рулетка 5000" (забыли на что ставить)
-                        if len(parts) == 2 and parts[1].isdigit():
-                            send_msg(peer_id, "❌ Ты забыл указать, на что ставишь! Напиши: Рулетка красное 5000", get_main_kb())
+                            process_roulette(user_id, peer_id, choice, bet_str)
                         else:
                             send_msg(peer_id, "❌ Формат: Рулетка красное 500 или Рулетка чет вб", get_main_kb())
 
-                elif text == "👤 Профиль":
-                    send_msg(peer_id, f"👤 Твой профиль:\n💰 Баланс: {balance}$\n🆔 ID: {user_id}", get_main_kb())
-                elif text == "🏆 Топ":
-                    top = sorted(db["users"].items(), key=lambda x: x[1], reverse=True)[:5]
-                    top_text = "🏆 Топ 5:\n" + "\n".join([f"{i}. ID {u} — {b}$" for i, (u, b) in enumerate(top, 1)])
-                    send_msg(peer_id, top_text, get_main_kb())
-                elif text == "📖 Помощь":
-                    send_msg(peer_id, "📖 Жми кнопки! Промокод: /promo [код]", get_main_kb())
+                    elif text == "👤 Профиль":
+                        send_msg(peer_id, f"👤 Твой профиль:\n💰 Баланс: {balance}$\n🆔 ID: {user_id}", get_main_kb())
+                    elif text == "🏆 Топ":
+                        top = sorted(db["users"].items(), key=lambda x: x[1], reverse=True)[:5]
+                        top_text = "🏆 Топ 5:\n" + "\n".join([f"{i}. ID {u} — {b}$" for i, (u, b) in enumerate(top, 1)])
+                        send_msg(peer_id, top_text, get_main_kb())
+                    elif text == "📖 Помощь":
+                        send_msg(peer_id, "📖 Жми кнопки! Промокод: /promo [код]", get_main_kb())
 
     except Exception as e:
         print(f"⚠️ Ошибка: {e}")
@@ -170,13 +145,15 @@ while True:
 def process_roulette(user_id, peer_id, choice, bet_str, reply_to=None):
     balance = get_balance(user_id)
     
-    # Определяем ставку
-    if bet_str in ["вб", "всё", "все"]:
+    # Делаем ставку "вб" (весь баланс) нечувствительной к регистру
+    bet_str_clean = bet_str.lower().replace("ё", "е")
+    
+    if bet_str_clean in ["вб", "всё", "все"]:
         bet = balance
-    elif bet_str.isdigit():
-        bet = int(bet_str)
-        if bet_str.endswith("к"):
-            bet = int(bet_str[:-1]) * 1000
+    elif bet_str_clean.isdigit():
+        bet = int(bet_str_clean)
+        if bet_str_clean.endswith("к"):
+            bet = int(bet_str_clean[:-1]) * 1000
     else:
         send_msg(peer_id, "❌ Неверная ставка. Введи число или 'вб'", reply_to=reply_to)
         return
@@ -188,7 +165,6 @@ def process_roulette(user_id, peer_id, choice, bet_str, reply_to=None):
         send_msg(peer_id, f"❌ У тебя нет столько денег! Баланс: {balance}$", reply_to=reply_to)
         return
 
-    # Крутим рулетку
     res = random.randint(0, 36)
     red_numbers = [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36]
     
