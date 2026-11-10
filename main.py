@@ -54,7 +54,7 @@ def update_balance(user_id, amount):
     conn.commit()
     conn.close()
 
-# ФОРМАТ ИМЕНИ (СИНЯЯ ССЫЛКА)
+# ФОРМАТ ИМЕНИ БЕЗ @ (СИНЯЯ ССЫЛКА БЕЗ УВЕДОМЛЕНИЙ)
 def get_user_name(user_id):
     try:
         user_info = vk.users.get(user_ids=user_id)[0]
@@ -68,7 +68,7 @@ def send_msg(peer_id, message, keyboard=None, reply_to=None):
         if keyboard: params['keyboard'] = keyboard
         if reply_to: params['reply_to'] = reply_to
         
-        # Отключаем уведомления, чтобы имена были просто синими, без тега
+        # Этот параметр убирает уведомления, оставляя синий текст
         params['disable_mentions'] = 1 
         
         return vk.messages.send(**params)
@@ -520,7 +520,7 @@ async def main():
                         target_bal = get_balance(target_id)
                         send_msg(peer_id, f"👤 Профиль {target_name}:\n💰 Баланс: {target_bal}\n🆔 ID: {target_id}", reply_to=reply_to_id)
                 
-                # ТОП 10 С БЕЛЫМИ ЦИФРАМИ И СИНИМИ ИМЕНАМИ
+                # ТОП 10 С СИНИМИ ИМЕНАМИ И БЕЛЫМИ ЦИФРАМИ
                 elif clean_text == "топ":
                     conn = sqlite3.connect(DB_FILE)
                     c = conn.cursor()
@@ -536,7 +536,6 @@ async def main():
                         
                         formatted_bal = f"{u_bal:,}".replace(",", ".")
                         
-                        # Пишем имя, тире, и число (число будет белым, т.к. оно вне тега)
                         top_text += f"{i}. {u_name} — {formatted_bal}\n"
                     
                     send_msg(peer_id, top_text, keyboard=get_main_kb() if is_ls else None, reply_to=reply_to_id)
