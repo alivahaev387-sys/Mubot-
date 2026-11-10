@@ -10,6 +10,11 @@ ADMIN_ID = 200005093141
 FORTUNA_CD = 600
 BONUS_CD = 600 
 
+# ⚠️ ВСТАВЬ СЮДА ID СВОЕЙ КАРТИНКИ РУЛЕТКИ ИЗ АЛЬБОМА ГРУППЫ!
+# Пример: "photo-243089386_457239017"
+# Если оставить пустым, картинки не будет, но текст придет.
+ROULETTE_IMAGE = "" 
+
 DATA_DIR = "/app/data"
 if not os.path.exists(DATA_DIR):
     os.makedirs(DATA_DIR)
@@ -142,6 +147,8 @@ async def process_roulette(user_id, peer_id, choice, bet_str, reply_to=None, is_
         send_msg(peer_id, f"❌ У тебя нет столько денег! Баланс: {balance}$", reply_to=reply_to); return
 
     res = random.randint(0, 36)
+    
+    # ПРАВИЛЬНЫЕ ЦВЕТА В РУЛЕТКЕ
     red_numbers = [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36]
     
     if res in red_numbers:
@@ -154,6 +161,7 @@ async def process_roulette(user_id, peer_id, choice, bet_str, reply_to=None, is_
         color_name = "чёрное"
         color_emoji = "⚫"
 
+    # ПРАВИЛЬНАЯ ЧЕТНОСТЬ
     if res == 0: even_name = "ноль"
     elif res % 2 == 0: even_name = "чётное"
     else: even_name = "нечётное"
@@ -202,11 +210,7 @@ async def process_roulette(user_id, peer_id, choice, bet_str, reply_to=None, is_
         )
         
     kb = get_main_kb() if is_ls else None
-    
-    # ССЫЛКА НА КАРТИНКУ РУЛЕТКИ
-    image_link = "https://sun9-22.userapi.com/impg/2P13i7G5aVj76s0m9eP7v3B4n6x1Q8k0z5w3gQ/roulette.png?size=1080x1080&quality=96&sign=5b9d3f2a1c8e7f4d6b2a5e8c1d3f7a9b&type=album"
-    
-    send_msg(peer_id, msg, keyboard=kb, reply_to=reply_to, attachment=image_link)
+    send_msg(peer_id, msg, keyboard=kb, reply_to=reply_to, attachment=ROULETTE_IMAGE if ROULETTE_IMAGE else None)
 
 async def process_fortune(user_id, peer_id, reply_to=None, is_ls=False):
     uid = str(user_id)
