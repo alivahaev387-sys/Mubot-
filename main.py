@@ -54,7 +54,7 @@ def update_balance(user_id, amount):
     conn.commit()
     conn.close()
 
-# ФОРМАТ ИМЕНИ БЕЗ @ (СИНЯЯ ССЫЛКА БЕЗ УВЕДОМЛЕНИЙ)
+# СИНЯЯ ССЫЛКА
 def get_user_name(user_id):
     try:
         user_info = vk.users.get(user_ids=user_id)[0]
@@ -68,7 +68,7 @@ def send_msg(peer_id, message, keyboard=None, reply_to=None):
         if keyboard: params['keyboard'] = keyboard
         if reply_to: params['reply_to'] = reply_to
         
-        # Этот параметр убирает уведомления, оставляя синий текст
+        # Отключаем уведомления
         params['disable_mentions'] = 1 
         
         return vk.messages.send(**params)
@@ -520,7 +520,7 @@ async def main():
                         target_bal = get_balance(target_id)
                         send_msg(peer_id, f"👤 Профиль {target_name}:\n💰 Баланс: {target_bal}\n🆔 ID: {target_id}", reply_to=reply_to_id)
                 
-                # ТОП 10 С СИНИМИ ИМЕНАМИ И БЕЛЫМИ ЦИФРАМИ
+                # ТОП 10 ПО МОНЕТАМ
                 elif clean_text == "топ":
                     conn = sqlite3.connect(DB_FILE)
                     c = conn.cursor()
@@ -528,15 +528,17 @@ async def main():
                     rows = c.fetchall()
                     conn.close()
                     
-                    top_text = "🏆 Топ 10:\n\n"
+                    top_text = "🏆 Топ 10 по монетам:\n\n"
                     for i, r in enumerate(rows, 1):
                         u_id = r[0]
                         u_bal = r[1]
                         u_name = get_user_name(u_id)
                         
+                        # Форматируем деньги (5.000.000)
                         formatted_bal = f"{u_bal:,}".replace(",", ".")
                         
-                        top_text += f"{i}. {u_name} — {formatted_bal}\n"
+                        # Перенос строки после имени, чтобы монеты были отдельно
+                        top_text += f"{i}. {u_name}\n💰 {formatted_bal}\n\n"
                     
                     send_msg(peer_id, top_text, keyboard=get_main_kb() if is_ls else None, reply_to=reply_to_id)
 
