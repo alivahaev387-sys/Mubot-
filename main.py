@@ -1,6 +1,6 @@
 import vk_api
 from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
-import json, random, time, os
+import json, random, time, os, requests
 
 # ===== НАСТРОЙКИ =====
 TOKEN = "vk1.a.n-y1VnQMFI87cAGH7zXHwYy6LncLM_UuAaCihe6dlWxUBLGwS8no-KjRmFrA9zmwy-STfP7f2VZOHArq1-WVKYVRUA3H1F3-pO5gtXRxEziw3u3st-dTYHNiK_an2ZcbUIpXYNy98HHTGQv12wFtMLsSASQ0kO0ke0B0DRsXc7hn-LQrYcpbu54a_kQmP7dxBO5a8gTmuS9Dn9LH7oMLfE6G6_GPJZxJAgkwzptCnWw"
@@ -136,7 +136,6 @@ while True:
                 cm_id = msg.get('conversation_message_id')
                 is_ls = (peer_id == user_id)
 
-                # Игнорируем неактивированные беседы
                 if not is_ls and peer_id not in db["active_chats"]:
                     continue
 
@@ -241,6 +240,9 @@ while True:
                     else:
                         send_msg(peer_id, "❌ Введи число!", get_main_kb(), reply_to=cm_id)
 
+    except requests.exceptions.ConnectionError as e:
+        print(f"⚠️ Обрыв соединения с ВК: {e}. Жду 5 секунд и переподключаюсь...")
+        time.sleep(5)
     except Exception as e:
-        print(f"⚠️ Ошибка: {e}")
+        print(f"⚠️ Другая ошибка: {e}")
         time.sleep(1)
