@@ -54,19 +54,23 @@ def update_balance(user_id, amount):
     conn.commit()
     conn.close()
 
-# СИНЯЯ ССЫЛКА БЕЗ ТЕГА
+# ФОРМАТ ИМЕНИ (СИНЯЯ ССЫЛКА)
 def get_user_name(user_id):
     try:
         user_info = vk.users.get(user_ids=user_id)[0]
-        return f"@[id{user_id}|{user_info['first_name']} {user_info['last_name']}]"
+        return f"[id{user_id}|{user_info['first_name']} {user_info['last_name']}]"
     except:
-        return f"@[id{user_id}|Игрок]"
+        return f"[id{user_id}|Игрок]"
 
 def send_msg(peer_id, message, keyboard=None, reply_to=None):
     try:
         params = {'peer_id': peer_id, 'message': message, 'random_id': random.randint(1, 2**31 - 1)}
         if keyboard: params['keyboard'] = keyboard
         if reply_to: params['reply_to'] = reply_to
+        
+        # Отключаем уведомления, чтобы имена были просто синими, без тега
+        params['disable_mentions'] = 1 
+        
         return vk.messages.send(**params)
     except Exception as e:
         print(f"Ошибка отправки: {e}")
@@ -255,7 +259,7 @@ async def main():
                             f"⚔️ Дуэль завершена!\n"
                             f"🏆 Победитель: {winner_name}\n"
                             f"❌ Проигравший: {loser_name}\n\n"
-                            f"💰 Победитель получает {prize} монет (с учётом комиссии 10%)!"
+                            f"💰 Победитель получает {prize} (комиссия 10%)!"
                         )
                         
                         edit_msg(peer_id, cm_id, msg_text, None)
@@ -398,9 +402,9 @@ async def main():
                     
                     msg = (
                         f"🎁 Бонус получен! ✨ VIP\n"
-                        f"+{bonus_amount:,}$\n".replace(",", ".") +
+                        f"+{bonus_amount:,}\n".replace(",", ".") +
                         f"+5 exp\n\n"
-                        f"💰 Баланс: {get_balance(user_id):,}$\n".replace(",", ".") +
+                        f"💰 Баланс: {get_balance(user_id):,}\n".replace(",", ".") +
                         f"Следующий бонус — через 10 минут."
                     )
                     send_msg(peer_id, msg, reply_to=reply_to_id)
@@ -419,7 +423,7 @@ async def main():
                     if len(parts) == 2 and parts[1].isdigit():
                         bet = int(parts[1])
                         if bet < 50 or bet > 2000:
-                            send_msg(peer_id, "❌ Ставка должна быть от 50 до 2000 монет.", reply_to=reply_to_id)
+                            send_msg(peer_id, "❌ Ставка должна быть от 50 до 2000.", reply_to=reply_to_id)
                             continue
                             
                         if get_balance(user_id) < bet:
@@ -437,8 +441,8 @@ async def main():
                         duel_text = (
                             f"⚔️ Дуэль на монеты!\n"
                             f"👤 Создатель: {get_user_name(user_id)}\n"
-                            f"💰 Ставка: {bet} монет\n\n"
-                            f"🌑 Приз: {int(bet*1.8)} монет победителю\n"
+                            f"💰 Ставка: {bet}\n\n"
+                            f"🌑 Приз: {int(bet*1.8)} победителю\n"
                             f"⚡ Нажмите \"Сразиться\", чтобы сразиться!!"
                         )
                         send_msg(peer_id, duel_text, get_duel_kb(duel_id), reply_to=reply_to_id)
@@ -510,13 +514,13 @@ async def main():
                         target_id = msg['reply_message']['from_id']
                     
                     if target_id == user_id:
-                        send_msg(peer_id, f"👤 Твой профиль:\n💰 Баланс: {get_balance(user_id)} монет\n🆔 ID: {user_id}", keyboard=get_main_kb() if is_ls else None, reply_to=reply_to_id)
+                        send_msg(peer_id, f"👤 Твой профиль:\n💰 Баланс: {get_balance(user_id)}\n🆔 ID: {user_id}", keyboard=get_main_kb() if is_ls else None, reply_to=reply_to_id)
                     else:
                         target_name = get_user_name(target_id)
                         target_bal = get_balance(target_id)
-                        send_msg(peer_id, f"👤 Профиль {target_name}:\n💰 Баланс: {target_bal} монет\n🆔 ID: {target_id}", reply_to=reply_to_id)
+                        send_msg(peer_id, f"👤 Профиль {target_name}:\n💰 Баланс: {target_bal}\n🆔 ID: {target_id}", reply_to=reply_to_id)
                 
-                # ТОП (10 МЕСТ, БЕЗ СЛОВА "МОНЕТ")
+                # ТОП 10 С БЕЛЫМИ ЦИФРАМИ И СИНИМИ ИМЕНАМИ
                 elif clean_text == "топ":
                     conn = sqlite3.connect(DB_FILE)
                     c = conn.cursor()
@@ -532,6 +536,7 @@ async def main():
                         
                         formatted_bal = f"{u_bal:,}".replace(",", ".")
                         
+                        # Пишем имя, тире, и число (число будет белым, т.к. оно вне тега)
                         top_text += f"{i}. {u_name} — {formatted_bal}\n"
                     
                     send_msg(peer_id, top_text, keyboard=get_main_kb() if is_ls else None, reply_to=reply_to_id)
@@ -562,13 +567,13 @@ async def main():
                             for m_id in members_list:
                                 update_balance(m_id, amount)
                                 
-                            send_msg(peer_id, f"✅ Выдано {amount}$ всем доступным игрокам!", reply_to=reply_to_id)
+                            send_msg(peer_id, f"✅ Выдано {amount} всем доступным игрокам!", reply_to=reply_to_id)
                             
                         elif len(parts) == 2 and parts[1].isdigit() and msg.get('reply_message'):
                             amount = int(parts[1])
                             target_id = msg['reply_message']['from_id']
                             update_balance(target_id, amount)
-                            send_msg(peer_id, f"✅ Выдано {amount}$ игроку {get_user_name(target_id)}!", reply_to=reply_to_id)
+                            send_msg(peer_id, f"✅ Выдано {amount} игроку {get_user_name(target_id)}!", reply_to=reply_to_id)
                         else:
                             send_msg(peer_id, "❌ Формат: /выдать all 5000 или ответом /выдать 5000", reply_to=reply_to_id)
                     except Exception as e:
@@ -586,7 +591,7 @@ async def main():
                         promo_list = "🎁 Активные промокоды:\n\n"
                         for r in rows:
                             used_count = len(r[3].split(",")) if r[3] else 0
-                            promo_list += f"▪️ `{r[0]}` — {r[1]}$ (Использовано: {used_count}/{r[2]})\n"
+                            promo_list += f"▪️ `{r[0]}` — {r[1]} (Использовано: {used_count}/{r[2]})\n"
                         send_msg(peer_id, promo_list, reply_to=reply_to_id)
 
                 elif (clean_text.startswith("создать") or clean_text.startswith("промокод")) and user_id == ADMIN_ID:
@@ -605,7 +610,7 @@ async def main():
                         c.execute("REPLACE INTO promos (code, amount, limit_count, used_by) VALUES (?, ?, ?, '')", (code, int(amount), limit))
                         conn.commit()
                         conn.close()
-                        send_msg(peer_id, f"✅ Промокод `{code}` на {amount}$ (Лимит: {limit}) создан!", reply_to=reply_to_id)
+                        send_msg(peer_id, f"✅ Промокод `{code}` на {amount} (Лимит: {limit}) создан!", reply_to=reply_to_id)
                     except Exception as e:
                         print(f"Ошибка создания промо: {e}")
                         send_msg(peer_id, "❌ Ошибка. Пример: /промокод beseda 5000", reply_to=reply_to_id)
@@ -647,7 +652,7 @@ async def main():
                         c.execute("UPDATE promos SET used_by = ? WHERE code = ?", (",".join(used_by), code))
                         conn.commit()
                         update_balance(user_id, amount)
-                        send_msg(peer_id, f"✅ Промокод активирован! +{amount}$\nОсталось активаций: {limit - len(used_by)}", reply_to=reply_to_id)
+                        send_msg(peer_id, f"✅ Промокод активирован! +{amount}\nОсталось активаций: {limit - len(used_by)}", reply_to=reply_to_id)
                         conn.close()
                     except Exception as e: 
                         print(f"Ошибка промо: {e}")
