@@ -6,6 +6,7 @@ import json, random, time, os
 TOKEN = "vk1.a.n-y1VnQMFI87cAGH7zXHwYy6LncLM_UuAaCihe6dlWxUBLGwS8no-KjRmFrA9zmwy-STfP7f2VZOHArq1-WVKYVRUA3H1F3-pO5gtXRxEziw3u3st-dTYHNiK_an2ZcbUIpXYNy98HHTGQv12wFtMLsSASQ0kO0ke0B0DRsXc7hn-LQrYcpbu54a_kQmP7dxBO5a8gTmuS9Dn9LH7oMLfE6G6_GPJZxJAgkwzptCnWw"
 GROUP_ID = 243089386
 ADMIN_ID = 200005093141 
+FORTUNA_CD = 600  # Кулдаун фортуны в секундах (10 минут = 600 сек)
 
 vk_session = vk_api.VkApi(token=TOKEN)
 longpoll = VkBotLongPoll(vk_session, GROUP_ID)
@@ -15,8 +16,11 @@ vk = vk_session.get_api()
 DB_FILE = "database.json"
 def load_db():
     if os.path.exists(DB_FILE):
-        with open(DB_FILE, "r", encoding="utf-8") as f: return json.load(f)
-    return {"users": {}, "promos": {}, "active_chats": [], "active_duel": {}}
+        with open(DB_FILE, "r", encoding="utf-8") as f: 
+            data = json.load(f)
+            if "fortune_cd" not in data: data["fortune_cd"] = {}
+            return data
+    return {"users": {}, "promos": {}, "active_chats": [], "active_duel": {}, "fortune_cd": {}}
 
 def save_db(data):
     with open(DB_FILE, "w", encoding="utf-8") as f: json.dump(data, f, ensure_ascii=False, indent=4)
@@ -55,7 +59,6 @@ def get_work_kb():
     }, ensure_ascii=False)
 
 def get_main_kb():
-    # Оставили только кнопку "Работа" и "Помощь"
     return json.dumps({
         "one_time": False, 
         "buttons": [
@@ -64,8 +67,8 @@ def get_main_kb():
         ]
     }, ensure_ascii=False)
 
-# ===== ЛОГИКА =====
-def process_roulette(user_id, peer_id, choice, bet_str, reply_to=None):
+# ===== ЛОГИКА ИГР =====
+def process_roulette(user_id, peer_id, choice, bet_str, reply_to=None, is_ls=False):
     balance = get_balance(user_id)
     bet_str_clean = bet_str.lower().replace("ё", "е")
     
@@ -114,20 +117,45 @@ def process_roulette(user_id, peer_id, choice, bet_str, reply_to=None):
     else:
         update_balance(user_id, -bet)
         msg = f"😔 ПРОИГРЫШ. Выпало {res} {color_emoji}\nТы потерял {bet}$\nБаланс: {get_balance(user_id)}$"
-    send_msg(peer_id, msg, reply_to=reply_to)
+        
+    kb = get_main_kb() if is_ls else None
+    send_msg(peer_id, msg, keyboard=kb, reply_to=reply_to)
 
-def process_fortune(user_id, peer_id, reply_to=None):
+# ===== ФОРТУНА С КУЛДАУНОМ =====
+def process_fortune(user_id, peer_id, reply_to=None, is_ls=False):
+    uid = str(user_id)
+    current_time = int(time.time())
+    
+    # Проверка кулдауна
+    last_use = db["fortune_cd"].get(uid, 0)
+    if current_time - last_use < FORTUNA_CD:
+        remaining = FORTUNA_CD - (current_time - last_use)
+        minutes = remaining // 60
+        seconds = remaining % 60
+        msg = f"⏳ Следующая фортуна будет доступна через {minutes} мин. {seconds} сек."
+        kb = get_main_kb() if is_ls else None
+        send_msg(peer_id, msg, keyboard=kb, reply_to=reply_to)
+        return
+
     balance = get_balance(user_id)
-    if balance < 100: send_msg(peer_id, "❌ Фортуна стоит 100$. У тебя мало денег.", reply_to=reply_to); return
+    if balance < 100: 
+        send_msg(peer_id, "❌ Фортуна стоит 100$. У тебя мало денег.", reply_to=reply_to); return
+    
+    # Списываем 100 и записываем время
     update_balance(user_id, -100)
+    db["fortune_cd"][uid] = current_time
+    save_db(db)
+    
     prizes = [0, 50, 100, 200, 500, 1000, 5000]
     prize = random.choice(prizes)
     update_balance(user_id, prize)
     msg = f"🎰 Крутим фортуну...\nВыпало: {prize}$!\nБаланс: {get_balance(user_id)}$"
-    send_msg(peer_id, msg, reply_to=reply_to)
+    
+    kb = get_main_kb() if is_ls else None
+    send_msg(peer_id, msg, keyboard=kb, reply_to=reply_to)
 
 # ===== ЗАПУСК =====
-print("БОТ ЗАПУЩЕН! ВСЁ ГОТОВО.")
+print("БОТ ЗАПУЩЕН! БЕЗ КНОПОК В БЕСЕДАХ.")
 
 while True:
     try:
@@ -141,33 +169,31 @@ while True:
                 is_ls = (peer_id == user_id)
                 
                 if is_ls and not text:
-                    send_msg(peer_id, f"👋 Привет! Твой баланс: {get_balance(user_id)}$\nНапиши /help чтобы узнать команды или жми кнопку Работа.", get_main_kb())
+                    send_msg(peer_id, f"👋 Привет! Твой баланс: {get_balance(user_id)}$\nЖми «Работа» или пиши /help", get_main_kb())
                     continue
                 
                 if not text: continue
                 balance = get_balance(user_id)
                 parts = text_lower.replace("/", "").split()
 
-                # === КОМАНДА /HELP (работает и в ЛС, и в беседе) ===
                 if text_lower in ["/help", "help", "помощь", "📖 помощь"]:
                     help_text = (
                         "📖 **Игровые команды:**\n\n"
-                        "🎰 /рулетка [цвет/чет] [ставка] - Игра\n"
-                        "🎲 /фортуна - Крутить колесо (100$)\n"
-                        "✂️ /rps [камень/ножницы/бумага] [ставка] - Игра\n"
-                        "⚔️ /duel [сумма] - Вызвать на дуэль (реплаем)\n"
+                        "🎰 /рулетка [цвет/чет] [ставка]\n"
+                        "🎲 /фортуна - Крутить (100$)\n"
+                        "✂️ /rps [камень/ножницы/бумага] [ставка]\n"
+                        "⚔️ /duel [сумма] - Вызов (реплаем)\n"
                         "👤 /профиль - Твой баланс\n"
                         "🏆 /топ - Богачи\n"
-                        "🎁 /promo [код] - Активировать промокод\n\n"
-                        "💼 В ЛС можно нажать кнопку «Работа»."
+                        "🎁 /promo [код] - Активировать"
                     )
-                    send_msg(peer_id, help_text, reply_to=msg.get('id'))
+                    kb = get_main_kb() if is_ls else None
+                    send_msg(peer_id, help_text, keyboard=kb, reply_to=msg.get('id'))
                     continue
 
-                # === КНОПКИ РАБОТЫ В ЛС ===
                 if is_ls:
                     if text_lower in ["начать", "start", "меню", "привет"]:
-                        send_msg(peer_id, f"🎰 Твой баланс: {balance}$\nЖми кнопки или пиши /help", get_main_kb())
+                        send_msg(peer_id, f"🎰 Твой баланс: {balance}$\nЖми кнопку или пиши /help", get_main_kb())
                     elif text == "💼 Работа":
                         send_msg(peer_id, "Выбери работу:", get_work_kb())
                     elif text == "🔙 Назад":
@@ -177,17 +203,16 @@ while True:
                         update_balance(user_id, earned)
                         send_msg(peer_id, f"✅ Ты заработал {earned}$!\n💰 Баланс: {get_balance(user_id)}$", get_work_kb())
 
-                # === ИГРОВЫЕ КОМАНДЫ (ДЛЯ ЛС И ДЛЯ БЕСЕД) ===
                 if text_lower.startswith(("/рулетка", "рулетка")):
                     if len(parts) >= 3:
                         bet_str = parts[-1]
                         choice = parts[1]
-                        process_roulette(user_id, peer_id, choice, bet_str, reply_to=msg.get('id'))
+                        process_roulette(user_id, peer_id, choice, bet_str, reply_to=msg.get('id'), is_ls=is_ls)
                     else:
                         send_msg(peer_id, "❌ Формат: /рулетка красное 500", reply_to=msg.get('id'))
                 
                 elif text_lower.startswith(("/фортуна", "фортуна")):
-                    process_fortune(user_id, peer_id, reply_to=msg.get('id'))
+                    process_fortune(user_id, peer_id, reply_to=msg.get('id'), is_ls=is_ls)
                 
                 elif text_lower.startswith(("/rps", "rps")):
                     if len(parts) == 3 and parts[2].isdigit():
@@ -207,7 +232,8 @@ while True:
                                 else:
                                     update_balance(user_id, -bet)
                                     msg_res = f"😔 Ты проиграл. Бот выбрал {bot_choice}. -{bet}$"
-                                send_msg(peer_id, msg_res + f"\nБаланс: {get_balance(user_id)}$", reply_to=msg.get('id'))
+                                kb = get_main_kb() if is_ls else None
+                                send_msg(peer_id, msg_res + f"\nБаланс: {get_balance(user_id)}$", keyboard=kb, reply_to=msg.get('id'))
                     else:
                         send_msg(peer_id, "❌ Формат: /rps камень 500", reply_to=msg.get('id'))
 
@@ -243,14 +269,15 @@ while True:
                         save_db(db)
 
                 elif text_lower in ["/профиль", "профиль"]:
-                    send_msg(peer_id, f"👤 Твой профиль:\n💰 Баланс: {balance}$\n🆔 ID: {user_id}", reply_to=msg.get('id'))
+                    kb = get_main_kb() if is_ls else None
+                    send_msg(peer_id, f"👤 Твой профиль:\n💰 Баланс: {balance}$\n🆔 ID: {user_id}", keyboard=kb, reply_to=msg.get('id'))
                 
                 elif text_lower in ["/топ", "топ"]:
                     top = sorted(db["users"].items(), key=lambda x: x[1], reverse=True)[:5]
                     top_text = "🏆 Топ 5:\n" + "\n".join([f"{i}. [id{u}|Игрок] — {b}$" for i, (u, b) in enumerate(top, 1)])
-                    send_msg(peer_id, top_text, reply_to=msg.get('id'))
+                    kb = get_main_kb() if is_ls else None
+                    send_msg(peer_id, top_text, keyboard=kb, reply_to=msg.get('id'))
 
-                # === ПРОМОКОДЫ ===
                 elif text_lower.startswith(("/промокод", "промокод")) and user_id == ADMIN_ID:
                     try:
                         _, code, amount = parts
