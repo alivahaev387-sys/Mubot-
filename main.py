@@ -8,6 +8,7 @@ TOKEN = "vk1.a.n-y1VnQMFI87cAGH7zXHwYy6LncLM_UuAaCihe6dlWxUBLGwS8no-KjRmFrA9zmwy
 GROUP_ID = 243089386
 ADMIN_ID = 200005093141 
 FORTUNA_CD = 600
+BONUS_CD = 600 # 10 минут (в секундах)
 
 DATA_DIR = "/app/data"
 if not os.path.exists(DATA_DIR):
@@ -25,6 +26,7 @@ def init_db():
     c.execute("CREATE TABLE IF NOT EXISTS users (user_id TEXT PRIMARY KEY, balance INTEGER DEFAULT 1000)")
     c.execute("CREATE TABLE IF NOT EXISTS promos (code TEXT PRIMARY KEY, amount INTEGER, limit_count INTEGER, used_by TEXT DEFAULT '')")
     c.execute("CREATE TABLE IF NOT EXISTS fortune_cd (user_id TEXT PRIMARY KEY, last_used INTEGER)")
+    c.execute("CREATE TABLE IF NOT EXISTS bonus_cd (user_id TEXT PRIMARY KEY, last_used INTEGER)")
     c.execute("CREATE TABLE IF NOT EXISTS games (game_id TEXT PRIMARY KEY, user_id TEXT, bet INTEGER, mines TEXT, opened TEXT, multiplier REAL)")
     c.execute("CREATE TABLE IF NOT EXISTS duels (peer_id TEXT PRIMARY KEY, challenger TEXT, target TEXT, bet INTEGER)")
     conn.commit()
@@ -307,6 +309,7 @@ async def main():
                         "🎰 /рулетка [цвет/чет] [ставка]\n"
                         "🎲 /фортуна - Крутить (100$)\n"
                         "💣 /мины [ставка] - Открывай алмазы\n"
+                        "🎁 /бонус - Получить бонус\n"
                         "✂️ /rps [фигура] [ставка]\n"
                         "⚔️ /duel [сумма] - Вызов (реплай)\n"
                         "👤 /профиль - Твой баланс (можно реплаем)\n"
@@ -315,6 +318,39 @@ async def main():
                         "📜 /промолист - Список активных кодов"
                     )
                     send_msg(peer_id, help_text, keyboard=get_main_kb() if is_ls else None, reply_to=reply_to_id); continue
+
+                # БОНУС
+                elif clean_text == "бонус":
+                    uid = str(user_id)
+                    current_time = int(time.time())
+                    
+                    conn = sqlite3.connect(DB_FILE)
+                    c = conn.cursor()
+                    c.execute("SELECT last_used FROM bonus_cd WHERE user_id = ?", (uid,))
+                    row = c.fetchone()
+                    last_use = row[0] if row else 0
+                    
+                    if current_time - last_use < BONUS_CD:
+                        remaining = BONUS_CD - (current_time - last_use)
+                        msg = f"⏳ Следующий бонус будет доступен через {remaining // 60} мин. {remaining % 60} сек."
+                        send_msg(peer_id, msg, reply_to=reply_to_id); conn.close(); continue
+                        
+                    bonus_amount = random.choice([1000000, 1500000, 2000000, 2500000, 3000000])
+                    update_balance(user_id, bonus_amount)
+                    
+                    c.execute("REPLACE INTO bonus_cd (user_id, last_used) VALUES (?, ?)", (uid, current_time))
+                    conn.commit()
+                    conn.close()
+                    
+                    msg = (
+                        f"🎁 Бонус получен! ✨ VIP\n"
+                        f"+{bonus_amount:,}$\n".replace(",", ".") +
+                        f"+5 exp\n\n"
+                        f"💰 Баланс: {get_balance(user_id):,}$\n".replace(",", ".") +
+                        f"Следующий бонус — через 10 минут."
+                    )
+                    send_msg(peer_id, msg, reply_to=reply_to_id)
+                    continue
 
                 if is_ls:
                     if clean_text in ["начать", "start", "меню", "привет"]:
@@ -325,7 +361,7 @@ async def main():
                         earned = random.randint(200, 800); update_balance(user_id, earned)
                         send_msg(peer_id, f"✅ Ты заработал {earned}$!\n💰 Баланс: {get_balance(user_id)}$", get_work_kb())
 
-                # КОМАНДА KICK (только владелец)
+                # КОМАНДА KICK
                 elif clean_text.startswith("kick") and user_id == ADMIN_ID and not is_ls:
                     target_id = None
                     if msg.get('reply_message'):
@@ -336,11 +372,9 @@ async def main():
                             send_msg(peer_id, "❌ Ты не можешь кикнуть сам себя.", reply_to=reply_to_id)
                         else:
                             try:
-                                # Пытаемся кикнуть
                                 vk.messages.removeChatUser(chat_id=peer_id - 2000000000, user_id=target_id)
                                 send_msg(peer_id, f"👢 Игрок {get_user_name(target_id)} был кикнут из беседы.", reply_to=reply_to_id)
                             except Exception as e:
-                                # Если у бота нет прав админа в беседе
                                 err_text = str(e).lower()
                                 if "no access" in err_text or "access denied" in err_text or "not enough" in err_text:
                                     send_msg(peer_id, f"⚠️ Я не могу кикнуть {get_user_name(target_id)}, потому что у меня нет прав администратора в этой беседе. Выдай мне админку!", reply_to=reply_to_id)
