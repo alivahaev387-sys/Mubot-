@@ -531,22 +531,36 @@ async def main():
                     
                     send_msg(peer_id, top_text, keyboard=get_main_kb() if is_ls else None, reply_to=reply_to_id)
 
+                # ВЫДАЧА ВСЕМ (ИСПРАВЛЕНО!)
                 elif clean_text.startswith("выдать") and user_id == ADMIN_ID:
                     try:
                         if len(parts) >= 3 and parts[1] == "all":
                             amount = int(parts[2])
                             
-                            # Берем всех юзеров из базы данных (а не из беседы)
-                            conn = sqlite3.connect(DB_FILE)
-                            c = conn.cursor()
-                            c.execute("SELECT user_id FROM users")
-                            users = c.fetchall()
-                            conn.close()
-                            
-                            for u in users:
-                                update_balance(u[0], amount)
+                            # Пытаемся взять участников из беседы
+                            members_list = []
+                            try:
+                                members = vk.messages.getConversationMembers(peer_id=peer_id)['items']
+                                for m in members:
+                                    if m['member_id'] > 0:
+                                        members_list.append(m['member_id'])
+                            except Exception as e:
+                                print(f"Не удалось взять участников беседы, берем из базы: {e}")
+                                # Если ошибка (нет прав), берем всех из базы
+                                conn = sqlite3.connect(DB_FILE)
+                                c = conn.cursor()
+                                c.execute("SELECT user_id FROM users")
+                                members_list = [int(row[0]) for row in c.fetchall()]
+                                conn.close()
+
+                            if not members_list:
+                                send_msg(peer_id, "❌ В беседе нет участников и база пуста.", reply_to=reply_to_id)
+                                continue
                                 
-                            send_msg(peer_id, f"✅ Выдано {amount}$ всем игрокам из базы данных!", reply_to=reply_to_id)
+                            for m_id in members_list:
+                                update_balance(m_id, amount)
+                                
+                            send_msg(peer_id, f"✅ Выдано {amount}$ всем доступным игрокам!", reply_to=reply_to_id)
                             
                         elif len(parts) == 2 and parts[1].isdigit() and msg.get('reply_message'):
                             amount = int(parts[1])
