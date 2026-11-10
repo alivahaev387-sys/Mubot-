@@ -1,2 +1,2 @@
-vk.api
-requests 
+vk_api
+aiosqlite
