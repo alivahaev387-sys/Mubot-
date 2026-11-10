@@ -54,14 +54,13 @@ def update_balance(user_id, amount):
     conn.commit()
     conn.close()
 
-# ИЗМЕНЕНА ФУНКЦИЯ ПОЛУЧЕНИЯ ИМЕНИ (Теперь без тега)
+# ИЗМЕНЕНА ФУНКЦИЯ (БЕЗ ТЕГОВ)
 def get_user_name(user_id):
     try:
         user_info = vk.users.get(user_ids=user_id)[0]
-        # Возвращаем как @id123 (Имя), чтобы не тегать
-        return f"@id{user_id} ({user_info['first_name']} {user_info['last_name']})"
+        return f"{user_info['first_name']} {user_info['last_name']}"
     except:
-        return f"@id{user_id} (Игрок)"
+        return f"Игрок {user_id}"
 
 def send_msg(peer_id, message, keyboard=None, reply_to=None):
     try:
@@ -517,6 +516,7 @@ async def main():
                         target_bal = get_balance(target_id)
                         send_msg(peer_id, f"👤 Профиль {target_name}:\n💰 Баланс: {target_bal}$\n🆔 ID: {target_id}", reply_to=reply_to_id)
                 
+                # ТОП БЕЗ ТЕГОВ
                 elif clean_text == "топ":
                     conn = sqlite3.connect(DB_FILE)
                     c = conn.cursor()
@@ -524,12 +524,15 @@ async def main():
                     rows = c.fetchall()
                     conn.close()
                     
-                    top_text = "🏆 Топ 5:\n"
+                    top_text = "🏆 Топ 5:\n\n"
                     for i, r in enumerate(rows, 1):
                         u_id = r[0]
                         u_bal = r[1]
                         u_name = get_user_name(u_id)
-                        top_text += f"{i}. {u_name} — {u_bal}$\n"
+                        
+                        formatted_bal = f"{u_bal:,}".replace(",", ".")
+                        
+                        top_text += f"{i}. {u_name} — {formatted_bal} монет\n"
                     
                     send_msg(peer_id, top_text, keyboard=get_main_kb() if is_ls else None, reply_to=reply_to_id)
 
@@ -545,4 +548,113 @@ async def main():
                                     if m['member_id'] > 0:
                                         members_list.append(m['member_id'])
                             except Exception as e:
-                                print(f"Не удалось взять участников беседы, берем из базы
+                                print(f"Не удалось взять участников беседы, берем из базы: {e}")
+                                conn = sqlite3.connect(DB_FILE)
+                                c = conn.cursor()
+                                c.execute("SELECT user_id FROM users")
+                                members_list = [int(row[0]) for row in c.fetchall()]
+                                conn.close()
+
+                            if not members_list:
+                                send_msg(peer_id, "❌ В беседе нет участников и база пуста.", reply_to=reply_to_id)
+                                continue
+                                
+                            for m_id in members_list:
+                                update_balance(m_id, amount)
+                                
+                            send_msg(peer_id, f"✅ Выдано {amount}$ всем доступным игрокам!", reply_to=reply_to_id)
+                            
+                        elif len(parts) == 2 and parts[1].isdigit() and msg.get('reply_message'):
+                            amount = int(parts[1])
+                            target_id = msg['reply_message']['from_id']
+                            update_balance(target_id, amount)
+                            send_msg(peer_id, f"✅ Выдано {amount}$ игроку {get_user_name(target_id)}!", reply_to=reply_to_id)
+                        else:
+                            send_msg(peer_id, "❌ Формат: /выдать all 5000 или ответом /выдать 5000", reply_to=reply_to_id)
+                    except Exception as e:
+                        print(f"Ошибка выдачи: {e}")
+
+                elif clean_text == "промолист":
+                    conn = sqlite3.connect(DB_FILE)
+                    c = conn.cursor()
+                    c.execute("SELECT code, amount, limit_count, used_by FROM promos")
+                    rows = c.fetchall()
+                    conn.close()
+                    if not rows:
+                        send_msg(peer_id, "❌ Активных промокодов нет.", reply_to=reply_to_id)
+                    else:
+                        promo_list = "🎁 Активные промокоды:\n\n"
+                        for r in rows:
+                            used_count = len(r[3].split(",")) if r[3] else 0
+                            promo_list += f"▪️ `{r[0]}` — {r[1]}$ (Использовано: {used_count}/{r[2]})\n"
+                        send_msg(peer_id, promo_list, reply_to=reply_to_id)
+
+                elif (clean_text.startswith("создать") or clean_text.startswith("промокод")) and user_id == ADMIN_ID:
+                    try:
+                        if len(parts) == 3:
+                            _, code, amount = parts
+                            limit = 50
+                        elif len(parts) == 4:
+                            _, code, amount, limit = parts
+                            limit = int(limit)
+                        else:
+                            send_msg(peer_id, "❌ Формат: /промокод код сумма [лимит]", reply_to=reply_to_id); continue
+
+                        conn = sqlite3.connect(DB_FILE)
+                        c = conn.cursor()
+                        c.execute("REPLACE INTO promos (code, amount, limit_count, used_by) VALUES (?, ?, ?, '')", (code, int(amount), limit))
+                        conn.commit()
+                        conn.close()
+                        send_msg(peer_id, f"✅ Промокод `{code}` на {amount}$ (Лимит: {limit}) создан!", reply_to=reply_to_id)
+                    except Exception as e:
+                        print(f"Ошибка создания промо: {e}")
+                        send_msg(peer_id, "❌ Ошибка. Пример: /промокод beseda 5000", reply_to=reply_to_id)
+                
+                elif clean_text.startswith("promo"):
+                    try:
+                        code = parts[1]
+                        try: is_member = vk.groups.isMember(group_id=GROUP_ID, user_id=user_id)
+                        except: is_member = 0
+                        
+                        if is_member == 0:
+                            send_msg(peer_id, "❌ Ошибка, чтобы активировать промокод нужен быть подписан на сообщество", keyboard=get_sub_kb(), reply_to=reply_to_id); continue
+                        
+                        conn = sqlite3.connect(DB_FILE)
+                        c = conn.cursor()
+                        c.execute("SELECT amount, limit_count, used_by FROM promos WHERE code = ?", (code,))
+                        row = c.fetchone()
+                        if not row: 
+                            send_msg(peer_id, "❌ Промокод не существует или истекло промо.", reply_to=reply_to_id)
+                            conn.close()
+                            continue
+                            
+                        amount, limit, used_by_str = row
+                        used_by = used_by_str.split(",") if used_by_str else []
+                        
+                        if len(used_by) >= limit:
+                            c.execute("DELETE FROM promos WHERE code = ?", (code,))
+                            conn.commit()
+                            send_msg(peer_id, "❌ Истекло промо. Лимит активаций закончился.", reply_to=reply_to_id)
+                            conn.close()
+                            continue
+                            
+                        if str(user_id) in used_by:
+                            send_msg(peer_id, "❌ Ты уже активировал этот промокод!", reply_to=reply_to_id)
+                            conn.close()
+                            continue
+                        
+                        used_by.append(str(user_id))
+                        c.execute("UPDATE promos SET used_by = ? WHERE code = ?", (",".join(used_by), code))
+                        conn.commit()
+                        update_balance(user_id, amount)
+                        send_msg(peer_id, f"✅ Промокод активирован! +{amount}$\nОсталось активаций: {limit - len(used_by)}", reply_to=reply_to_id)
+                        conn.close()
+                    except Exception as e: 
+                        print(f"Ошибка промо: {e}")
+                        send_msg(peer_id, "❌ Формат: /promo код", reply_to=reply_to_id)
+
+        except Exception as e:
+            print(f"⚠️ Ошибка в цикле: {e}")
+
+if __name__ == "__main__":
+    asyncio.run(main())
