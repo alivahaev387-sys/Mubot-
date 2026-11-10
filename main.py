@@ -62,7 +62,7 @@ def get_work_kb():
         ]
     }, ensure_ascii=False)
 
-print("БОТ ЗАПУЩЕН! ЖДУ КОМАНД...")
+print("БОТ ЗАПУЩЕН! РУЛЕТКА РАБОТАЕТ.")
 
 while True:
     try:
@@ -71,11 +71,13 @@ while True:
                 msg = event.object.message
                 user_id = msg['from_id']
                 peer_id = msg['peer_id']
-                # Убираем все лишние пробелы и невидимые символы
-                text = msg.get('text', '').strip().replace('\n', ' ')
+                
+                # Приводим текст к нижнему регистру и убираем пробелы по краям
+                text = msg.get('text', '').strip()
                 text_lower = text.lower()
                 is_ls = (peer_id == user_id)
                 
+                # Если нажали "Начать" (текста нет)
                 if is_ls and not text:
                     send_msg(peer_id, f"👋 Привет! Твой баланс: {get_balance(user_id)}$\nВыбирай действие 👇", get_main_kb())
                     continue
@@ -97,6 +99,7 @@ while True:
                         update_balance(user_id, earned)
                         send_msg(peer_id, f"✅ Ты заработал {earned}$!\n💰 Баланс: {get_balance(user_id)}$", get_work_kb())
                     
+                    # === ПРАВИЛА РУЛЕТКИ (Кнопка) ===
                     elif text == "🎰 Рулетка" or text_lower == "рулетка":
                         rules_text = (
                             "Как играть в рулетку ❓\n\n"
@@ -116,17 +119,18 @@ while True:
                         )
                         send_msg(peer_id, rules_text, get_main_kb())
 
-                    # Обработка команды "Рулетка ..."
-                    elif text_lower.startswith("рулетка "):
-                        parts = text_lower.split()
-                        print(f"DEBUG: Получена команда рулетки: {parts}") # Проверка в логах
+                    # === САМА ИГРА (Обработка "Рулетка ...") ===
+                    elif text_lower.startswith("рулетка ") or text_lower.startswith("/рулетка "):
+                        # Чистим команду от лишних слэшей
+                        clean_text = text_lower.replace("/", "")
+                        parts = clean_text.split()
                         
                         if len(parts) >= 3:
                             bet_str = parts[-1]
                             choice = " ".join(parts[1:-1])
                             process_roulette(user_id, peer_id, choice, bet_str)
                         else:
-                            send_msg(peer_id, "❌ Формат: Рулетка красное 500 или Рулетка чет вб", get_main_kb())
+                            send_msg(peer_id, "❌ Формат: Рулетка красное 5000 или Рулетка чет вб", get_main_kb())
 
                     elif text == "👤 Профиль":
                         send_msg(peer_id, f"👤 Твой профиль:\n💰 Баланс: {balance}$\n🆔 ID: {user_id}", get_main_kb())
@@ -145,17 +149,17 @@ while True:
 def process_roulette(user_id, peer_id, choice, bet_str, reply_to=None):
     balance = get_balance(user_id)
     
-    # Делаем ставку "вб" (весь баланс) нечувствительной к регистру
+    # Парсим ставку (вб, 1кк, 500)
     bet_str_clean = bet_str.lower().replace("ё", "е")
     
     if bet_str_clean in ["вб", "всё", "все"]:
         bet = balance
     elif bet_str_clean.isdigit():
         bet = int(bet_str_clean)
-        if bet_str_clean.endswith("к"):
-            bet = int(bet_str_clean[:-1]) * 1000
+    elif "к" in bet_str_clean and bet_str_clean.replace("к", "").isdigit():
+        bet = int(bet_str_clean.replace("к", "")) * 1000
     else:
-        send_msg(peer_id, "❌ Неверная ставка. Введи число или 'вб'", reply_to=reply_to)
+        send_msg(peer_id, "❌ Неверная ставка. Введи число, '1кк' или 'вб'", reply_to=reply_to)
         return
 
     if bet < 10 and bet != balance:
@@ -165,11 +169,14 @@ def process_roulette(user_id, peer_id, choice, bet_str, reply_to=None):
         send_msg(peer_id, f"❌ У тебя нет столько денег! Баланс: {balance}$", reply_to=reply_to)
         return
 
+    # Крутим
     res = random.randint(0, 36)
     red_numbers = [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36]
     
     win = False
     win_multiplier = 2
+    
+    choice = choice.replace("/", "").strip()
     
     if choice.isdigit():
         if int(choice) == res: win = True; win_multiplier = 36
