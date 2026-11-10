@@ -2,6 +2,7 @@ import vk_api
 from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
 import json, random, time, asyncio, os
 import sqlite3
+import requests
 
 # ===== НАСТРОЙКИ =====
 TOKEN = "vk1.a.n-y1VnQMFI87cAGH7zXHwYy6LncLM_UuAaCihe6dlWxUBLGwS8no-KjRmFrA9zmwy-STfP7f2VZOHArq1-WVKYVRUA3H1F3-pO5gtXRxEziw3u3st-dTYHNiK_an2ZcbUIpXYNy98HHTGQv12wFtMLsSASQ0kO0ke0B0DRsXc7hn-LQrYcpbu54a_kQmP7dxBO5a8gTmuS9Dn9LH7oMLfE6G6_GPJZxJAgkwzptCnWw"
@@ -9,9 +10,6 @@ GROUP_ID = 243089386
 ADMIN_ID = 200005093141 
 FORTUNA_CD = 600
 BONUS_CD = 600 
-
-# ВСТАВЛЕН ID КАРТИНКИ ИЗ ТВОЕГО ЗАПРОСА
-ROULETTE_IMAGE = "photo-243089386_458170282"
 
 DATA_DIR = "/app/data"
 if not os.path.exists(DATA_DIR):
@@ -64,6 +62,28 @@ def get_user_name(user_id):
         return f"[id{user_id}|{user_info['first_name']} {user_info['last_name']}]"
     except:
         return f"[id{user_id}|Игрок]"
+
+# ФУНКЦИЯ ДЛЯ ЗАГРУЗКИ КАРТИНКИ В ВК (ЧТОБЫ НЕ БЫЛО "ФОТО НЕДОСТУПНО")
+def get_attachment_from_url(image_url, peer_id):
+    try:
+        # Скачиваем картинку
+        img_data = requests.get(image_url).content
+        
+        # Получаем сервер для загрузки
+        upload_server = vk.photos.getMessagesUploadServer(peer_id=peer_id)
+        
+        # Загружаем
+        upload_url = upload_server['upload_url']
+        files = {'photo': ('image.jpg', img_data)}
+        response = requests.post(upload_url, files=files).json()
+        
+        # Сохраняем
+        save_result = vk.photos.saveMessagesPhoto(photo=response['photo'], server=response['server'], hash=response['hash'])[0]
+        
+        return f"photo{save_result['owner_id']}_{save_result['id']}"
+    except Exception as e:
+        print(f"Ошибка загрузки фото: {e}")
+        return None
 
 def send_msg(peer_id, message, keyboard=None, reply_to=None, attachment=None):
     try:
@@ -208,7 +228,14 @@ async def process_roulette(user_id, peer_id, choice, bet_str, reply_to=None, is_
         )
         
     kb = get_main_kb() if is_ls else None
-    send_msg(peer_id, msg, keyboard=kb, reply_to=reply_to, attachment=ROULETTE_IMAGE if ROULETTE_IMAGE else None)
+    
+    # ССЫЛКА НА КАРТИНКУ РУЛЕТКИ ИЗ ИНТЕРНЕТА
+    # (Бот сам скачает её и загрузит в ВК)
+    image_url = "https://i.ibb.co/3s6yKq5/roulette.jpg" # Ссылка на красивую картинку рулетки
+    
+    attachment = get_attachment_from_url(image_url, peer_id)
+    
+    send_msg(peer_id, msg, keyboard=kb, reply_to=reply_to, attachment=attachment)
 
 async def process_fortune(user_id, peer_id, reply_to=None, is_ls=False):
     uid = str(user_id)
