@@ -160,7 +160,7 @@ def process_fortune(user_id, peer_id, reply_to=None, is_ls=False):
     send_msg(peer_id, msg, keyboard=kb, reply_to=reply_to)
 
 # ===== ЗАПУСК =====
-print("БОТ ЗАПУЩЕН! ПРОВЕРКА ПОДПИСКИ ВКЛЮЧЕНА.")
+print("БОТ ЗАПУЩЕН! ПРОМОКОДЫ С ЛИМИТОМ И ПОДПИСКОЙ.")
 
 while True:
     try:
@@ -283,42 +283,61 @@ while True:
                     kb = get_main_kb() if is_ls else None
                     send_msg(peer_id, top_text, keyboard=kb, reply_to=msg.get('id'))
 
-                elif text_lower.startswith(("/промокод", "промокод")) and user_id == ADMIN_ID:
+                # === СОЗДАНИЕ ПРОМОКОДА С ЛИМИТОМ ===
+                elif text_lower.startswith(("/создать", "создать", "/промокод")) and user_id == ADMIN_ID:
                     try:
-                        _, code, amount = parts
-                        db["promos"][code] = int(amount)
+                        # Формат: /создать название сумма лимит
+                        _, code, amount, limit = parts
+                        db["promos"][code] = {"amount": int(amount), "limit": int(limit), "used_by": []}
                         save_db(db)
-                        send_msg(peer_id, f"✅ Промокод `{code}` на {amount}$ создан!", reply_to=msg.get('id'))
+                        send_msg(peer_id, f"✅ Промокод `{code}` на {amount}$ (Лимит: {limit} активаций) создан!", reply_to=msg.get('id'))
                     except:
-                        send_msg(peer_id, "❌ Формат: /промокод название сумма", reply_to=msg.get('id'))
+                        send_msg(peer_id, "❌ Формат: /создать название сумма лимит (Пример: /создать beseda 5000 50)", reply_to=msg.get('id'))
                 
-                # === АКТИВАЦИЯ ПРОМОКОДА С ПРОВЕРКОЙ ПОДПИСКИ ===
+                # === АКТИВАЦИЯ ПРОМОКОДА (ПОДПИСКА + ЛИМИТ + 1 РАЗ НА ЧЕЛОВЕКА) ===
                 elif text_lower.startswith(("/promo", "promo")):
                     try:
                         code = parts[1]
                         
-                        # Проверяем подписку через ВК API
+                        # 1. Проверка подписки
                         try:
                             is_member = vk.groups.isMember(group_id=GROUP_ID, user_id=user_id)
-                        except Exception as e:
-                            print(f"Ошибка проверки подписки: {e}")
-                            is_member = 0 # Если ошибка (нет прав), считаем, что не подписан
+                        except:
+                            is_member = 0
                         
                         if is_member == 0:
-                            msg = "❌ Чтобы активировать промокод, вы должны быть подписаны на наше сообщество!"
-                            # В ЛС и в беседе прикрепляем инлайн-кнопку подписки
-                            send_msg(peer_id, msg, keyboard=get_sub_kb(), reply_to=msg.get('id'))
+                            msg_sub = "❌ Ошибка, чтобы активировать промокод нужен быть подписан на сообщество"
+                            send_msg(peer_id, msg_sub, keyboard=get_sub_kb(), reply_to=msg.get('id'))
+                            continue
+                        
+                        # 2. Проверка существования промокода
+                        if code not in db["promos"]:
+                            send_msg(peer_id, "❌ Такого промокода не существует или истекло промо.", reply_to=msg.get('id'))
                             continue
                             
-                        # Если подписан - активируем
-                        if code in db["promos"]:
-                            reward = db["promos"][code]
+                        promo_data = db["promos"][code]
+                        
+                        # 3. Проверка лимита
+                        if len(promo_data["used_by"]) >= promo_data["limit"]:
+                            send_msg(peer_id, "❌ Истекло промо. Лимит активаций закончился.", reply_to=msg.get('id'))
                             del db["promos"][code]
                             save_db(db)
-                            update_balance(user_id, reward)
-                            send_msg(peer_id, f"✅ Промокод активирован! +{reward}$", reply_to=msg.get('id'))
-                        else:
-                            send_msg(peer_id, "❌ Неверный промокод или он уже активирован.", reply_to=msg.get('id'))
+                            continue
+                            
+                        # 4. Проверка, не активировал ли он уже
+                        if user_id in promo_data["used_by"]:
+                            send_msg(peer_id, "❌ Ты уже активировал этот промокод!", reply_to=msg.get('id'))
+                            continue
+                            
+                        # 5. Выдача награды
+                        reward = promo_data["amount"]
+                        promo_data["used_by"].append(user_id) # Записываем, кто активировал
+                        save_db(db)
+                        update_balance(user_id, reward)
+                        
+                        left = promo_data["limit"] - len(promo_data["used_by"])
+                        send_msg(peer_id, f"✅ Промокод активирован! +{reward}$\nОсталось активаций: {left}", reply_to=msg.get('id'))
+                        
                     except:
                         send_msg(peer_id, "❌ Формат: /promo код", reply_to=msg.get('id'))
 
