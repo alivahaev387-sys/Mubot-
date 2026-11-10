@@ -54,13 +54,6 @@ def update_balance(user_id, amount):
     conn.commit()
     conn.close()
 
-def set_balance(user_id, amount):
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute("UPDATE users SET balance = ? WHERE user_id = ?", (amount, str(user_id)))
-    conn.commit()
-    conn.close()
-
 # СИНЯЯ ССЫЛКА
 def get_user_name(user_id):
     try:
@@ -540,20 +533,20 @@ async def main():
                         
                         formatted_bal = f"{u_bal:,}".replace(",", ".")
                         
-                        # ВАЖНО: Пробел перед тире делает цифры БЕЛЫМИ
+                        # Пробел перед тире делает цифры БЕЛЫМИ
                         top_text += f"{i}. {u_name} — {formatted_bal}\n"
                     
                     send_msg(peer_id, top_text, keyboard=get_main_kb() if is_ls else None, reply_to=reply_to_id)
 
-                # НОВАЯ КОМАНДА /ОБНУЛИТЬ
+                # ОБНУЛИТЬ ВСЕХ
                 elif clean_text.startswith("обнулить") and user_id == ADMIN_ID:
                     try:
-                        if msg.get('reply_message'):
-                            target_id = msg['reply_message']['from_id']
-                            set_balance(target_id, 0)
-                            send_msg(peer_id, f"✅ Баланс игрока {get_user_name(target_id)} обнулен (0).", reply_to=reply_to_id)
-                        else:
-                            send_msg(peer_id, "❌ Чтобы обнулить баланс, ответь (реплаем) на сообщение игрока и напиши /обнулить", reply_to=reply_to_id)
+                        conn = sqlite3.connect(DB_FILE)
+                        c = conn.cursor()
+                        c.execute("UPDATE users SET balance = 0")
+                        conn.commit()
+                        conn.close()
+                        send_msg(peer_id, "✅ Баланс всех игроков в базе данных был обнулен!", reply_to=reply_to_id)
                     except Exception as e:
                         print(f"Ошибка обнуления: {e}")
 
