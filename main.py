@@ -538,17 +538,29 @@ async def main():
                     
                     send_msg(peer_id, top_text, keyboard=get_main_kb() if is_ls else None, reply_to=reply_to_id)
 
-                # ОБНУЛИТЬ ВСЕХ
+                # ОБНУЛИТЬ (ВСЕХ ИЛИ ОДНОГО)
                 elif clean_text.startswith("обнулить") and user_id == ADMIN_ID:
                     try:
-                        conn = sqlite3.connect(DB_FILE)
-                        c = conn.cursor()
-                        c.execute("UPDATE users SET balance = 0")
-                        conn.commit()
-                        conn.close()
-                        send_msg(peer_id, "✅ Баланс всех игроков в базе данных был обнулен!", reply_to=reply_to_id)
+                        if msg.get('reply_message'):
+                            # Если ответили на сообщение — обнуляем одного
+                            target_id = msg['reply_message']['from_id']
+                            conn = sqlite3.connect(DB_FILE)
+                            c = conn.cursor()
+                            c.execute("UPDATE users SET balance = 0 WHERE user_id = ?", (str(target_id),))
+                            conn.commit()
+                            conn.close()
+                            send_msg(peer_id, f"✅ Баланс игрока {get_user_name(target_id)} был обнулен (0).", reply_to=reply_to_id)
+                        else:
+                            # Если без ответа — обнуляем всех
+                            conn = sqlite3.connect(DB_FILE)
+                            c = conn.cursor()
+                            c.execute("UPDATE users SET balance = 0")
+                            conn.commit()
+                            conn.close()
+                            send_msg(peer_id, "✅ Баланс ВСЕХ игроков в базе данных был обнулен (0)!", reply_to=reply_to_id)
                     except Exception as e:
                         print(f"Ошибка обнуления: {e}")
+                        send_msg(peer_id, "❌ Произошла ошибка при обнулении.", reply_to=reply_to_id)
 
                 elif clean_text.startswith("выдать") and user_id == ADMIN_ID:
                     try:
