@@ -10,10 +10,8 @@ ADMIN_ID = 200005093141
 FORTUNA_CD = 600
 BONUS_CD = 600 
 
-# ⚠️ ВСТАВЬ СЮДА ID СВОЕЙ КАРТИНКИ РУЛЕТКИ ИЗ АЛЬБОМА ГРУППЫ!
-# Пример: "photo-243089386_457239017"
-# Если оставить пустым, картинки не будет, но текст придет.
-ROULETTE_IMAGE = "" 
+# ВСТАВЛЕН ID КАРТИНКИ ИЗ ТВОЕГО ЗАПРОСА
+ROULETTE_IMAGE = "photo-243089386_458170282"
 
 DATA_DIR = "/app/data"
 if not os.path.exists(DATA_DIR):
@@ -148,7 +146,7 @@ async def process_roulette(user_id, peer_id, choice, bet_str, reply_to=None, is_
 
     res = random.randint(0, 36)
     
-    # ПРАВИЛЬНЫЕ ЦВЕТА В РУЛЕТКЕ
+    # ПРАВИЛЬНЫЕ ЦВЕТА РУЛЕТКИ
     red_numbers = [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36]
     
     if res in red_numbers:
