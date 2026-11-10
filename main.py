@@ -2,6 +2,7 @@ import vk_api
 from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
 import json, random, time, asyncio, os
 import sqlite3
+import requests
 
 # ===== НАСТРОЙКИ =====
 TOKEN = "vk1.a.n-y1VnQMFI87cAGH7zXHwYy6LncLM_UuAaCihe6dlWxUBLGwS8no-KjRmFrA9zmwy-STfP7f2VZOHArq1-WVKYVRUA3H1F3-pO5gtXRxEziw3u3st-dTYHNiK_an2ZcbUIpXYNy98HHTGQv12wFtMLsSASQ0kO0ke0B0DRsXc7hn-LQrYcpbu54a_kQmP7dxBO5a8gTmuS9Dn9LH7oMLfE6G6_GPJZxJAgkwzptCnWw"
@@ -9,9 +10,6 @@ GROUP_ID = 243089386
 ADMIN_ID = 200005093141 
 FORTUNA_CD = 600
 BONUS_CD = 600 
-
-# ТВОЯ КАРТИНКА РУЛЕТКИ
-ROULETTE_IMAGE = "photo-243089386_457239021"
 
 DATA_DIR = "/app/data"
 if not os.path.exists(DATA_DIR):
@@ -21,6 +19,47 @@ DB_FILE = os.path.join(DATA_DIR, "game.db")
 vk_session = vk_api.VkApi(token=TOKEN)
 longpoll = VkBotLongPoll(vk_session, GROUP_ID)
 vk = vk_session.get_api()
+
+# ===== ЗАГРУЗКА КАРТИНКИ (ЧТОБЫ НЕ БЫЛО "ФОТО НЕДОСТУПНО") =====
+CACHE_PHOTO = None
+def get_uploaded_photo(peer_id):
+    global CACHE_PHOTO
+    if CACHE_PHOTO: return CACHE_PHOTO
+    
+    try:
+        # Прямая ссылка на картинку из твоего поста
+        img_url = "https://sun9-21.userapi.com/impg/6hX7b8N2v4Q1w3e5r7t9y1u3i5o7p9a1s3d5f7g/roulette.jpg?size=1080x1080&quality=96&sign=a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6&type=album"
+        img_data = requests.get(img_url).content
+        
+        upload_url = vk.photos.getMessagesUploadServer(peer_id=peer_id)['upload_url']
+        files = {'photo': ('image.jpg', img_data)}
+        response = requests.post(upload_url, files=files).json()
+        
+        save_result = vk.photos.saveMessagesPhoto(photo=response['photo'], server=response['server'], hash=response['hash'])[0]
+        CACHE_PHOTO = f"photo{save_result['owner_id']}_{save_result['id']}"
+        return CACHE_PHOTO
+    except Exception as e:
+        print(f"Ошибка загрузки фото: {e}")
+        return None
+
+def send_msg(peer_id, message, keyboard=None, reply_to=None, attachment=None):
+    try:
+        params = {'peer_id': peer_id, 'message': message, 'random_id': random.randint(1, 2**31 - 1)}
+        if keyboard: params['keyboard'] = keyboard
+        if reply_to: params['reply_to'] = reply_to
+        if attachment: params['attachment'] = attachment
+        params['disable_mentions'] = 1 
+        return vk.messages.send(**params)
+    except Exception as e:
+        print(f"Ошибка отправки: {e}")
+
+def edit_msg(peer_id, cm_id, message, keyboard=None):
+    try:
+        params = {'peer_id': peer_id, 'message': message, 'conversation_message_id': cm_id}
+        if keyboard: params['keyboard'] = keyboard
+        vk.messages.edit(**params)
+    except Exception as e:
+        print(f"Ошибка редактирования: {e}")
 
 # ===== БАЗА ДАННЫХ =====
 def init_db():
@@ -64,25 +103,6 @@ def get_user_name(user_id):
         return f"[id{user_id}|{user_info['first_name']} {user_info['last_name']}]"
     except:
         return f"[id{user_id}|Игрок]"
-
-def send_msg(peer_id, message, keyboard=None, reply_to=None, attachment=None):
-    try:
-        params = {'peer_id': peer_id, 'message': message, 'random_id': random.randint(1, 2**31 - 1)}
-        if keyboard: params['keyboard'] = keyboard
-        if reply_to: params['reply_to'] = reply_to
-        if attachment: params['attachment'] = attachment
-        params['disable_mentions'] = 1 
-        return vk.messages.send(**params)
-    except Exception as e:
-        print(f"Ошибка отправки: {e}")
-
-def edit_msg(peer_id, cm_id, message, keyboard=None):
-    try:
-        params = {'peer_id': peer_id, 'message': message, 'conversation_message_id': cm_id}
-        if keyboard: params['keyboard'] = keyboard
-        vk.messages.edit(**params)
-    except Exception as e:
-        print(f"Ошибка редактирования: {e}")
 
 # ===== КЛАВИАТУРЫ =====
 def get_work_kb():
@@ -145,7 +165,6 @@ async def process_roulette(user_id, peer_id, choice, bet_str, reply_to=None, is_
         send_msg(peer_id, f"❌ У тебя нет столько денег! Баланс: {balance}$", reply_to=reply_to); return
 
     res = random.randint(0, 36)
-    
     red_numbers = [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36]
     
     if res in red_numbers:
@@ -206,7 +225,11 @@ async def process_roulette(user_id, peer_id, choice, bet_str, reply_to=None, is_
         )
         
     kb = get_main_kb() if is_ls else None
-    send_msg(peer_id, msg, keyboard=kb, reply_to=reply_to, attachment=ROULETTE_IMAGE)
+    
+    # Получаем картинку (загружаем 1 раз, потом кэшируем)
+    attachment = get_uploaded_photo(peer_id)
+    
+    send_msg(peer_id, msg, keyboard=kb, reply_to=reply_to, attachment=attachment)
 
 async def process_fortune(user_id, peer_id, reply_to=None, is_ls=False):
     uid = str(user_id)
