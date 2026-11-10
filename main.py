@@ -517,24 +517,27 @@ async def main():
                         target_bal = get_balance(target_id)
                         send_msg(peer_id, f"👤 Профиль {target_name}:\n💰 Баланс: {target_bal}\n🆔 ID: {target_id}", reply_to=reply_to_id)
                 
-                # ТОП 10 ПО МОНЕТАМ
+                # ТОП 10 (ТОЛЬКО ТЕ, У КОГО > 2 МОНЕТ)
                 elif clean_text == "топ":
                     conn = sqlite3.connect(DB_FILE)
                     c = conn.cursor()
-                    c.execute("SELECT user_id, balance FROM users ORDER BY balance DESC LIMIT 10")
+                    c.execute("SELECT user_id, balance FROM users WHERE balance > 2 ORDER BY balance DESC LIMIT 10")
                     rows = c.fetchall()
                     conn.close()
                     
                     top_text = "🏆 Топ 10 по монетам:\n\n"
-                    for i, r in enumerate(rows, 1):
-                        u_id = r[0]
-                        u_bal = r[1]
-                        u_name = get_user_name(u_id)
-                        
-                        formatted_bal = f"{u_bal:,}".replace(",", ".")
-                        
-                        # Пробел перед тире делает цифры БЕЛЫМИ
-                        top_text += f"{i}. {u_name} — {formatted_bal}\n"
+                    
+                    if not rows:
+                        top_text += "Пока никого нет."
+                    else:
+                        for i, r in enumerate(rows, 1):
+                            u_id = r[0]
+                            u_bal = r[1]
+                            u_name = get_user_name(u_id)
+                            
+                            formatted_bal = f"{u_bal:,}".replace(",", ".")
+                            
+                            top_text += f"{i}. {u_name} — {formatted_bal}\n"
                     
                     send_msg(peer_id, top_text, keyboard=get_main_kb() if is_ls else None, reply_to=reply_to_id)
 
