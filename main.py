@@ -54,7 +54,7 @@ def update_balance(user_id, amount):
     conn.commit()
     conn.close()
 
-# ИЗМЕНЕНА ФУНКЦИЯ (БЕЗ ТЕГОВ)
+# ФУНКЦИЯ ПОЛУЧЕНИЯ ИМЕНИ (БЕЗ ТЕГОВ)
 def get_user_name(user_id):
     try:
         user_info = vk.users.get(user_ids=user_id)[0]
@@ -516,15 +516,15 @@ async def main():
                         target_bal = get_balance(target_id)
                         send_msg(peer_id, f"👤 Профиль {target_name}:\n💰 Баланс: {target_bal}$\n🆔 ID: {target_id}", reply_to=reply_to_id)
                 
-                # ТОП БЕЗ ТЕГОВ
+                # ТОП (ИСПРАВЛЕНО: 10 МЕСТ, БЕЗ ЛИШНИХ ПЕРЕНОСОВ)
                 elif clean_text == "топ":
                     conn = sqlite3.connect(DB_FILE)
                     c = conn.cursor()
-                    c.execute("SELECT user_id, balance FROM users ORDER BY balance DESC LIMIT 5")
+                    c.execute("SELECT user_id, balance FROM users ORDER BY balance DESC LIMIT 10") # ТЕПЕРЬ 10 МЕСТ
                     rows = c.fetchall()
                     conn.close()
                     
-                    top_text = "🏆 Топ 5:\n\n"
+                    top_text = "🏆 Топ 10:\n\n"
                     for i, r in enumerate(rows, 1):
                         u_id = r[0]
                         u_bal = r[1]
@@ -532,6 +532,7 @@ async def main():
                         
                         formatted_bal = f"{u_bal:,}".replace(",", ".")
                         
+                        # БЕЗ ЛИШНИХ ПЕРЕНОСОВ (в одну строчку)
                         top_text += f"{i}. {u_name} — {formatted_bal} монет\n"
                     
                     send_msg(peer_id, top_text, keyboard=get_main_kb() if is_ls else None, reply_to=reply_to_id)
