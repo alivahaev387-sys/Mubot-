@@ -13,7 +13,7 @@ vk_session = vk_api.VkApi(token=TOKEN)
 longpoll = VkBotLongPoll(vk_session, GROUP_ID)
 vk = vk_session.get_api()
 
-# ===== БАЗА ДАННЫХ (Асинхронный SQLite) =====
+# ===== БАЗА ДАННЫХ =====
 DB_NAME = "game.db"
 
 async def init_db():
@@ -178,11 +178,11 @@ async def process_fortune(user_id, peer_id, reply_to=None, is_ls=False):
 # ===== ОСНОВНОЙ ЦИКЛ =====
 async def main():
     await init_db()
-    print("БОТ ЗАПУЩЕН! МИНЫ С ИНТЕРФЕЙСОМ (PostgreSQL-ready архитектура).")
+    print("БОТ ЗАПУЩЕН! РЕПЛАИ В БЕСЕДАХ ВКЛЮЧЕНЫ.")
 
     for event in longpoll.listen():
         try:
-            # ОБРАБОТКА КНОПОК
+            # ОБРАБОТКА КНОПОК (МИНЫ)
             if event.type == VkBotEventType.MESSAGE_EVENT:
                 payload = event.object.payload
                 peer_id, user_id, event_id, cm_id = event.object.peer_id, event.object.user_id, event.object.event_id, event.object.conversation_message_id
@@ -263,55 +263,59 @@ async def main():
             if event.type == VkBotEventType.MESSAGE_NEW:
                 msg = event.object.message
                 user_id, peer_id = msg['from_id'], msg['peer_id']
-                text = msg.get('text', '').strip()
-                text_lower = text.lower()
+                text = msg.get('text', '').strip().lower()
                 is_ls = (peer_id == user_id)
                 balance = await get_balance(user_id)
-                parts = text_lower.replace("/", "").split()
+                
+                clean_text = text.replace("/", "").strip()
+                parts = clean_text.split()
+                
+                # ВОТ ГЛАВНОЕ ИСПРАВЛЕНИЕ: В беседах всегда отвечаем реплаем (msg.get('id')), в ЛС - без реплая
+                reply_id = msg.get('id') if not is_ls else None
 
                 if not text and is_ls:
                     send_msg(peer_id, f"👋 Привет! Твой баланс: {balance}$\nЖми «Работа» или пиши /help", get_main_kb()); continue
                 if not text: continue
 
-                if text_lower in ["/help", "help", "помощь"]:
-                    help_text = "📖 Команды:\n/рулетка [цвет] [ставка]\n/фортуна\n/мины [ставка]\n/rps [фигура] [ставка]\n/duel [сумма] (реплай)\n/профиль\n/топ\n/promo [код]"
-                    send_msg(peer_id, help_text, keyboard=get_main_kb() if is_ls else None, reply_to=msg.get('id')); continue
+                if clean_text in ["help", "помощь", "команды"]:
+                    help_text = "📖 Команды:\n/рулетка [цвет] [ставка]\n/фортуна\n/мины [ставка]\n/rps [фигура] [ставка]\n/duel [сумма] (реплай)\n/профиль\n/топ\n/promo [код]\n/промокод [код] [сумма] (для админа)"
+                    send_msg(peer_id, help_text, keyboard=get_main_kb() if is_ls else None, reply_to=reply_id); continue
 
                 if is_ls:
-                    if text_lower in ["начать", "start", "меню", "привет"]:
+                    if clean_text in ["начать", "start", "меню", "привет"]:
                         send_msg(peer_id, f"🎰 Твой баланс: {balance}$\nЖми кнопку или пиши /help", get_main_kb())
-                    elif text == "💼 Работа": send_msg(peer_id, "Выбери работу:", get_work_kb())
-                    elif text == "🔙 Назад": send_msg(peer_id, "Меню:", get_main_kb())
-                    elif text in ["🚕 Такси", "🎣 Рыбалка", "🏹 Охота"]:
+                    elif text == "💼 работа": send_msg(peer_id, "Выбери работу:", get_work_kb())
+                    elif text == "🔙 назад": send_msg(peer_id, "Меню:", get_main_kb())
+                    elif text in ["🚕 такси", "🎣 рыбалка", "🏹 охота"]:
                         earned = random.randint(200, 800); await update_balance(user_id, earned)
                         send_msg(peer_id, f"✅ Ты заработал {earned}$!\n💰 Баланс: {await get_balance(user_id)}$", get_work_kb())
 
-                elif text_lower.startswith(("/мины", "мины")):
+                if clean_text.startswith("рулетка") or clean_text.startswith("рул"):
+                    if len(parts) >= 3:
+                        await process_roulette(user_id, peer_id, parts[1], parts[-1], reply_to=reply_id, is_ls=is_ls)
+                    else: send_msg(peer_id, "❌ Формат: /рулетка красное 500", reply_to=reply_id)
+                
+                elif clean_text.startswith("фортуна"):
+                    await process_fortune(user_id, peer_id, reply_to=reply_id, is_ls=is_ls)
+                
+                elif clean_text.startswith("мины"):
                     if len(parts) >= 2:
                         bet_str = parts[1]
                         bet = balance if bet_str in ["все", "вб", "всё"] else int(bet_str) if bet_str.isdigit() else int(bet_str[:-1]) * 1000 if bet_str.endswith("к") and bet_str[:-1].isdigit() else 0
-                        if bet < 10 or bet > balance: send_msg(peer_id, f"❌ Мин. ставка 10, у тебя {balance}$", reply_to=msg.get('id')); continue
+                        if bet < 10 or bet > balance: send_msg(peer_id, f"❌ Мин. ставка 10, у тебя {balance}$", reply_to=reply_id); continue
                         
                         game_id = str(random.randint(10000, 99999))
                         async with aiosqlite.connect(DB_NAME) as db:
                             await db.execute("INSERT INTO games (game_id, user_id, bet, mines, opened, multiplier) VALUES (?, ?, ?, '[]', '[]', 1.0)", (game_id, str(user_id), bet))
                             await db.commit()
-                        send_msg(peer_id, f"💣 Мины\nСтавка: {bet}$\n\nВыберите количество мин (2-8):", get_mines_count_kb(game_id), reply_to=msg.get('id'))
-                    else:
-                        send_msg(peer_id, "❌ Формат: /мины [ставка]", reply_to=msg.get('id'))
+                        send_msg(peer_id, f"💣 Мины\nСтавка: {bet}$\n\nВыберите количество мин (2-8):", get_mines_count_kb(game_id), reply_to=reply_id)
+                    else: send_msg(peer_id, "❌ Формат: /мины 500", reply_to=reply_id)
 
-                elif text_lower.startswith(("/рулетка", "рулетка")):
-                    if len(parts) >= 3: await process_roulette(user_id, peer_id, parts[1], parts[-1], reply_to=msg.get('id'), is_ls=is_ls)
-                    else: send_msg(peer_id, "❌ Формат: /рулетка красное 500", reply_to=msg.get('id'))
-                
-                elif text_lower.startswith(("/фортуна", "фортуна")):
-                    await process_fortune(user_id, peer_id, reply_to=msg.get('id'), is_ls=is_ls)
-                
-                elif text_lower.startswith(("/rps", "rps")):
+                elif clean_text.startswith("rps"):
                     if len(parts) == 3 and parts[2].isdigit():
                         bet, p_choice = int(parts[2]), parts[1]
-                        if bet > balance or bet < 10: send_msg(peer_id, f"❌ Мин. ставка 10, у тебя {balance}$", reply_to=msg.get('id'))
-                        elif p_choice not in ["камень", "ножницы", "бумага"]: send_msg(peer_id, "❌ Выбери: камень, ножницы или бумага.", reply_to=msg.get('id'))
+                        if bet > balance or bet < 10: send_msg(peer_id, f"❌ Мин. ставка 10, у тебя {balance}$", reply_to=reply_id)
+                        elif p_choice not in ["камень", "ножницы", "бумага"]: send_msg(peer_id, "❌ Выбери: камень, ножницы или бумага.", reply_to=reply_id)
                         else:
                             b_choice = random.choice(["камень", "ножницы", "бумага"])
                             if p_choice == b_choice: res = f"🤝 Ничья! Бот выбрал {b_choice}."
@@ -319,86 +323,96 @@ async def main():
                                 await update_balance(user_id, bet); res = f"🎉 Ты победил! Бот выбрал {b_choice}. +{bet}$"
                             else:
                                 await update_balance(user_id, -bet); res = f"😔 Ты проиграл. Бот выбрал {b_choice}. -{bet}$"
-                            send_msg(peer_id, res + f"\nБаланс: {await get_balance(user_id)}$", keyboard=get_main_kb() if is_ls else None, reply_to=msg.get('id'))
-                    else: send_msg(peer_id, "❌ Формат: /rps камень 500", reply_to=msg.get('id'))
+                            send_msg(peer_id, res + f"\nБаланс: {await get_balance(user_id)}$", keyboard=get_main_kb() if is_ls else None, reply_to=reply_id)
+                    else: send_msg(peer_id, "❌ Формат: /rps камень 500", reply_to=reply_id)
 
-                elif text_lower.startswith(("/duel", "duel")):
+                elif clean_text.startswith("duel"):
                     if len(parts) == 2 and parts[1].isdigit():
                         bet = int(parts[1])
                         if msg.get('reply_message'):
                             target_id = msg['reply_message']['from_id']
-                            if target_id == user_id: send_msg(peer_id, "❌ Нельзя дуэлиться с собой.", reply_to=msg.get('id'))
+                            if target_id == user_id: send_msg(peer_id, "❌ Нельзя дуэлиться с собой.", reply_to=reply_id)
                             else:
-                                send_msg(peer_id, f"⚔️ [id{user_id}|Игрок] вызывает [id{target_id}|Игрока] на дуэль на {bet}$!\nЦель, напиши /принять.", reply_to=msg.get('id'))
+                                send_msg(peer_id, f"⚔️ [id{user_id}|Игрок] вызывает [id{target_id}|Игрока] на дуэль на {bet}$!\nЦель, напиши /принять.", reply_to=reply_id)
                                 async with aiosqlite.connect(DB_NAME) as db:
                                     await db.execute("CREATE TABLE IF NOT EXISTS duels (peer_id TEXT PRIMARY KEY, challenger TEXT, target TEXT, bet INTEGER)")
                                     await db.execute("REPLACE INTO duels (peer_id, challenger, target, bet) VALUES (?, ?, ?, ?)", (str(peer_id), str(user_id), str(target_id), bet))
                                     await db.commit()
-                        else: send_msg(peer_id, "❌ Ответь (реплаем) на сообщение того, кого вызываешь.", reply_to=msg.get('id'))
-                    else: send_msg(peer_id, "❌ Формат: /duel 500", reply_to=msg.get('id'))
+                        else: send_msg(peer_id, "❌ Ответь (реплаем) на сообщение того, кого вызываешь.", reply_to=reply_id)
+                    else: send_msg(peer_id, "❌ Формат: /duel 500", reply_to=reply_id)
                 
-                elif text_lower in ["/принять", "принять"]:
+                elif clean_text == "принять":
                     async with aiosqlite.connect(DB_NAME) as db:
                         async with db.execute("SELECT challenger, target, bet FROM duels WHERE peer_id = ?", (str(peer_id),)) as cursor:
                             row = await cursor.fetchone()
                             if row:
                                 challenger, target, bet = row
                                 if target == str(user_id):
-                                    if await get_balance(user_id) < bet or await get_balance(challenger) < bet: send_msg(peer_id, "❌ У кого-то из вас не хватает денег.", reply_to=msg.get('id'))
+                                    if await get_balance(user_id) < bet or await get_balance(challenger) < bet: send_msg(peer_id, "❌ У кого-то из вас не хватает денег.", reply_to=reply_id)
                                     else:
                                         winner = random.choice([user_id, int(challenger)])
                                         loser = int(challenger) if winner == user_id else user_id
                                         await update_balance(winner, bet); await update_balance(loser, -bet)
-                                        send_msg(peer_id, f"⚔️ Дуэль окончена! Победил [id{winner}|Игрок] и забрал {bet}$!", reply_to=msg.get('id'))
+                                        send_msg(peer_id, f"⚔️ Дуэль окончена! Победил [id{winner}|Игрок] и забрал {bet}$!", reply_to=reply_id)
                                     await db.execute("DELETE FROM duels WHERE peer_id = ?", (str(peer_id),)); await db.commit()
 
-                elif text_lower in ["/профиль", "профиль"]:
-                    send_msg(peer_id, f"👤 Твой профиль:\n💰 Баланс: {balance}$\n🆔 ID: {user_id}", keyboard=get_main_kb() if is_ls else None, reply_to=msg.get('id'))
+                elif clean_text in ["профиль", "баланс"]:
+                    send_msg(peer_id, f"👤 Твой профиль:\n💰 Баланс: {balance}$\n🆔 ID: {user_id}", keyboard=get_main_kb() if is_ls else None, reply_to=reply_id)
                 
-                elif text_lower in ["/топ", "топ"]:
+                elif clean_text == "топ":
                     async with aiosqlite.connect(DB_NAME) as db:
                         async with db.execute("SELECT user_id, balance FROM users ORDER BY balance DESC LIMIT 5") as cursor:
                             top = await cursor.fetchall()
                     top_text = "🏆 Топ 5:\n" + "\n".join([f"{i}. [id{u}|Игрок] — {b}$" for i, (u, b) in enumerate(top, 1)])
-                    send_msg(peer_id, top_text, keyboard=get_main_kb() if is_ls else None, reply_to=msg.get('id'))
+                    send_msg(peer_id, top_text, keyboard=get_main_kb() if is_ls else None, reply_to=reply_id)
 
-                elif text_lower.startswith(("/создать", "создать")) and user_id == ADMIN_ID:
+                elif (clean_text.startswith("создать") or clean_text.startswith("промокод")) and user_id == ADMIN_ID:
                     try:
-                        _, code, amount, limit = parts
+                        if len(parts) == 3:
+                            _, code, amount = parts
+                            limit = 50
+                        elif len(parts) == 4:
+                            _, code, amount, limit = parts
+                            limit = int(limit)
+                        else:
+                            send_msg(peer_id, "❌ Формат: /промокод код сумма [лимит]", reply_to=reply_id); continue
+
                         async with aiosqlite.connect(DB_NAME) as db:
-                            await db.execute("REPLACE INTO promos (code, amount, limit_count, used_by) VALUES (?, ?, ?, '')", (code, int(amount), int(limit)))
+                            await db.execute("REPLACE INTO promos (code, amount, limit_count, used_by) VALUES (?, ?, ?, '')", (code, int(amount), limit))
                             await db.commit()
-                        send_msg(peer_id, f"✅ Промокод `{code}` на {amount}$ (Лимит: {limit}) создан!", reply_to=msg.get('id'))
-                    except: send_msg(peer_id, "❌ Формат: /создать название сумма лимит", reply_to=msg.get('id'))
+                        send_msg(peer_id, f"✅ Промокод `{code}` на {amount}$ (Лимит: {limit}) создан!", reply_to=reply_id)
+                    except Exception as e:
+                        print(f"Ошибка создания промо: {e}")
+                        send_msg(peer_id, "❌ Ошибка. Пример: /промокод beseda 5000", reply_to=reply_id)
                 
-                elif text_lower.startswith(("/promo", "promo")):
+                elif clean_text.startswith("promo"):
                     try:
                         code = parts[1]
                         try: is_member = vk.groups.isMember(group_id=GROUP_ID, user_id=user_id)
                         except: is_member = 0
                         
                         if is_member == 0:
-                            send_msg(peer_id, "❌ Ошибка, чтобы активировать промокод нужен быть подписан на сообщество", keyboard=get_sub_kb(), reply_to=msg.get('id')); continue
+                            send_msg(peer_id, "❌ Ошибка, чтобы активировать промокод нужен быть подписан на сообщество", keyboard=get_sub_kb(), reply_to=reply_id); continue
                         
                         async with aiosqlite.connect(DB_NAME) as db:
                             async with db.execute("SELECT amount, limit_count, used_by FROM promos WHERE code = ?", (code,)) as cursor:
                                 row = await cursor.fetchone()
-                                if not row: send_msg(peer_id, "❌ Промокод не существует или истекло промо.", reply_to=msg.get('id')); continue
+                                if not row: send_msg(peer_id, "❌ Промокод не существует или истекло промо.", reply_to=reply_id); continue
                                 amount, limit, used_by_str = row
                                 used_by = used_by_str.split(",") if used_by_str else []
                                 
                                 if len(used_by) >= limit:
                                     await db.execute("DELETE FROM promos WHERE code = ?", (code,)); await db.commit()
-                                    send_msg(peer_id, "❌ Истекло промо. Лимит активаций закончился.", reply_to=msg.get('id')); continue
+                                    send_msg(peer_id, "❌ Истекло промо. Лимит активаций закончился.", reply_to=reply_id); continue
                                 if str(user_id) in used_by:
-                                    send_msg(peer_id, "❌ Ты уже активировал этот промокод!", reply_to=msg.get('id')); continue
+                                    send_msg(peer_id, "❌ Ты уже активировал этот промокод!", reply_to=reply_id); continue
                                 
                                 used_by.append(str(user_id))
                                 await db.execute("UPDATE promos SET used_by = ? WHERE code = ?", (",".join(used_by), code))
                                 await db.commit()
                                 await update_balance(user_id, amount)
-                                send_msg(peer_id, f"✅ Промокод активирован! +{amount}$\nОсталось активаций: {limit - len(used_by)}", reply_to=msg.get('id'))
-                    except: send_msg(peer_id, "❌ Формат: /promo код", reply_to=msg.get('id'))
+                                send_msg(peer_id, f"✅ Промокод активирован! +{amount}$\nОсталось активаций: {limit - len(used_by)}", reply_to=reply_id)
+                    except: send_msg(peer_id, "❌ Формат: /promo код", reply_to=reply_id)
 
         except Exception as e:
             print(f"⚠️ Ошибка в цикле: {e}")
