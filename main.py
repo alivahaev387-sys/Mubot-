@@ -9,7 +9,6 @@ GROUP_ID = 243089386
 ADMIN_ID = 200005093141 
 FORTUNA_CD = 600
 
-# БАЗА ДАННЫХ В ПАПКЕ DATA (НЕ СБРАСЫВАЕТСЯ)
 DATA_DIR = "/app/data"
 if not os.path.exists(DATA_DIR):
     os.makedirs(DATA_DIR)
@@ -19,7 +18,7 @@ vk_session = vk_api.VkApi(token=TOKEN)
 longpoll = VkBotLongPoll(vk_session, GROUP_ID)
 vk = vk_session.get_api()
 
-# ===== БАЗА ДАННЫХ (SQLite) =====
+# ===== БАЗА ДАННЫХ =====
 def init_db():
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
@@ -302,7 +301,6 @@ async def main():
                     send_msg(peer_id, f"👋 Привет! Твой баланс: {get_balance(user_id)}$\nЖми «Работа» или пиши /help", get_main_kb()); continue
                 if not text: continue
 
-                # ИСПРАВЛЕННЫЙ HELP
                 if clean_text in ["help", "помощь", "команды"]:
                     help_text = (
                         "📖 **Игровые команды:**\n\n"
@@ -327,7 +325,30 @@ async def main():
                         earned = random.randint(200, 800); update_balance(user_id, earned)
                         send_msg(peer_id, f"✅ Ты заработал {earned}$!\n💰 Баланс: {get_balance(user_id)}$", get_work_kb())
 
-                if clean_text.startswith("рулетка") or clean_text.startswith("рул"):
+                # НОВАЯ КОМАНДА /kick
+                elif clean_text.startswith("kick") and user_id == ADMIN_ID and not is_ls:
+                    target_id = None
+                    if msg.get('reply_message'):
+                        target_id = msg['reply_message']['from_id']
+                    
+                    if target_id:
+                        if target_id == user_id:
+                            send_msg(peer_id, "❌ Ты не можешь кикнуть сам себя.", reply_to=reply_to_id)
+                        else:
+                            try:
+                                # Пытаемся кикнуть через API
+                                vk.messages.removeChatUser(chat_id=peer_id - 2000000000, user_id=target_id)
+                                send_msg(peer_id, f"👢 Игрок {get_user_name(target_id)} был кикнут из беседы.", reply_to=reply_to_id)
+                            except Exception as e:
+                                # Если у бота нет прав админа
+                                if "no access to this chat" in str(e).lower() or "access denied" in str(e).lower():
+                                    send_msg(peer_id, f"⚠️ Я не могу кикнуть {get_user_name(target_id)}, потому что у меня нет прав администратора в этой беседе. Выдай мне админку!", reply_to=reply_to_id)
+                                else:
+                                    send_msg(peer_id, f"❌ Ошибка при кике: {e}", reply_to=reply_to_id)
+                    else:
+                        send_msg(peer_id, "❌ Чтобы кикнуть, ответь (реплаем) на сообщение игрока и напиши /kick", reply_to=reply_to_id)
+
+                elif clean_text.startswith("рулетка") or clean_text.startswith("рул"):
                     if len(parts) >= 3:
                         await process_roulette(user_id, peer_id, parts[1], parts[-1], reply_to=reply_to_id, is_ls=is_ls)
                     else: send_msg(peer_id, "❌ Формат: /рулетка красное 500", reply_to=reply_to_id)
@@ -427,7 +448,6 @@ async def main():
                     
                     send_msg(peer_id, top_text, keyboard=get_main_kb() if is_ls else None, reply_to=reply_to_id)
 
-                # ВЫДАЧА ВСЕМ
                 elif clean_text.startswith("выдать") and user_id == ADMIN_ID:
                     try:
                         if len(parts) >= 3 and parts[1] == "all":
@@ -450,7 +470,6 @@ async def main():
                     except Exception as e:
                         print(f"Ошибка выдачи: {e}")
 
-                # ПРОМОЛИСТ
                 elif clean_text == "промолист":
                     conn = sqlite3.connect(DB_FILE)
                     c = conn.cursor()
@@ -466,7 +485,6 @@ async def main():
                             promo_list += f"▪️ `{r[0]}` — {r[1]}$ (Использовано: {used_count}/{r[2]})\n"
                         send_msg(peer_id, promo_list, reply_to=reply_to_id)
 
-                # СОЗДАНИЕ ПРОМОКОДА (только владелец)
                 elif (clean_text.startswith("создать") or clean_text.startswith("промокод")) and user_id == ADMIN_ID:
                     try:
                         if len(parts) == 3:
@@ -488,7 +506,6 @@ async def main():
                         print(f"Ошибка создания промо: {e}")
                         send_msg(peer_id, "❌ Ошибка. Пример: /промокод beseda 5000", reply_to=reply_to_id)
                 
-                # АКТИВАЦИЯ ПРОМОКОДА
                 elif clean_text.startswith("promo"):
                     try:
                         code = parts[1]
@@ -506,23 +523,4 @@ async def main():
                         amount, limit, used_by_str = row
                         used_by = used_by_str.split(",") if used_by_str else []
                         
-                        if len(used_by) >= limit:
-                            c.execute("DELETE FROM promos WHERE code = ?", (code,))
-                            conn.commit()
-                            send_msg(peer_id, "❌ Истекло промо. Лимит активаций закончился.", reply_to=reply_to_id); conn.close(); continue
-                        if str(user_id) in used_by:
-                            send_msg(peer_id, "❌ Ты уже активировал этот промокод!", reply_to=reply_to_id); conn.close(); continue
-                        
-                        used_by.append(str(user_id))
-                        c.execute("UPDATE promos SET used_by = ? WHERE code = ?", (",".join(used_by), code))
-                        conn.commit()
-                        update_balance(user_id, amount)
-                        send_msg(peer_id, f"✅ Промокод активирован! +{amount}$\nОсталось активаций: {limit - len(used_by)}", reply_to=reply_to_id)
-                        conn.close()
-                    except: send_msg(peer_id, "❌ Формат: /promo код", reply_to=reply_to_id)
-
-        except Exception as e:
-            print(f"⚠️ Ошибка в цикле: {e}")
-
-if __name__ == "__main__":
-    asyncio.run(main())
+                        if len(used_by)
