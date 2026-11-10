@@ -142,7 +142,6 @@ async def process_roulette(user_id, peer_id, choice, bet_str, reply_to=None, is_
 
     res = random.randint(0, 36)
     
-    # ПРАВИЛЬНЫЕ ЦВЕТА РУЛЕТКИ
     red_numbers = [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36]
     
     if res in red_numbers:
@@ -155,13 +154,9 @@ async def process_roulette(user_id, peer_id, choice, bet_str, reply_to=None, is_
         color_name = "чёрное"
         color_emoji = "⚫"
 
-    # ПРАВИЛЬНАЯ ЧЕТНОСТЬ (ЧЕТ - ДЕЛИТСЯ НА 2, НЕЧЕТ - НЕ ДЕЛИТСЯ)
-    if res == 0: 
-        even_name = "ноль"
-    elif res % 2 == 0: 
-        even_name = "чётное"
-    else: 
-        even_name = "нечётное"
+    if res == 0: even_name = "ноль"
+    elif res % 2 == 0: even_name = "чётное"
+    else: even_name = "нечётное"
 
     win, win_multiplier = False, 2
     choice = choice.replace("/", "").strip()
@@ -207,7 +202,6 @@ async def process_roulette(user_id, peer_id, choice, bet_str, reply_to=None, is_
         )
         
     kb = get_main_kb() if is_ls else None
-    # ОТПРАВЛЯЕМ ТОЛЬКО ТЕКСТ (БЕЗ КАРТИНОК И НАДПИСИ "ФОТО НЕДОСТУПНО")
     send_msg(peer_id, msg, keyboard=kb, reply_to=reply_to)
 
 async def process_fortune(user_id, peer_id, reply_to=None, is_ls=False):
