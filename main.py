@@ -7,9 +7,6 @@ TOKEN = "vk1.a.n-y1VnQMFI87cAGH7zXHwYy6LncLM_UuAaCihe6dlWxUBLGwS8no-KjRmFrA9zmwy
 GROUP_ID = 243089386
 ADMIN_ID = 200005093141 
 
-# Сюда вставь ссылку на картинку с рулеткой, которую ты загрузил в альбом группы (или оставь пустым)
-ROULETTE_PHOTO = "" 
-
 vk_session = vk_api.VkApi(token=TOKEN)
 longpoll = VkBotLongPoll(vk_session, GROUP_ID)
 vk = vk_session.get_api()
@@ -38,12 +35,11 @@ def update_balance(user_id, amount):
     db["users"][uid] = get_balance(user_id) + amount
     save_db(db)
 
-def send_msg(peer_id, message, keyboard=None, reply_to=None, attachment=None):
+def send_msg(peer_id, message, keyboard=None, reply_to=None):
     try:
         params = {'peer_id': peer_id, 'message': message, 'random_id': random.randint(1, 2**31 - 1)}
         if keyboard: params['keyboard'] = keyboard
         if reply_to: params['reply_to'] = reply_to
-        if attachment: params['attachment'] = attachment
         vk.messages.send(**params)
     except Exception as e:
         print(f"Ошибка отправки: {e}")
@@ -130,11 +126,10 @@ def process_roulette(user_id, peer_id, choice, bet_str, reply_to=None):
         update_balance(user_id, -bet)
         msg = f"😔 ПРОИГРЫШ. Выпало {res} {color_emoji}\nТы потерял {bet}$\nБаланс: {get_balance(user_id)}$"
 
-    # Отправляем ответ реплаем
     send_msg(peer_id, msg, get_main_kb(), reply_to=reply_to)
 
 # ===== ЗАПУСК =====
-print("БОТ ЗАПУЩЕН! РУЛЕТКА ГОТОВА.")
+print("БОТ ЗАПУЩЕН! ТЕСТ РУЛЕТКИ.")
 
 while True:
     try:
@@ -186,6 +181,7 @@ while True:
                         )
                         send_msg(peer_id, rules_text, get_main_kb())
 
+                    # ЖЕСТКАЯ ПРОВЕРКА КОМАНДЫ (Ловит и "Рулетка", и "Рул")
                     elif text_lower.startswith(("рулетка ", "рул ")):
                         parts = text_lower.replace("/", "").split()
                         if len(parts) >= 3:
