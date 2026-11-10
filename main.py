@@ -54,13 +54,13 @@ def update_balance(user_id, amount):
     conn.commit()
     conn.close()
 
-# ПРОСТО ИМЯ И ФАМИЛИЯ (БЕЗ ТЕГОВ)
+# СИНЯЯ ССЫЛКА БЕЗ ТЕГА
 def get_user_name(user_id):
     try:
         user_info = vk.users.get(user_ids=user_id)[0]
-        return f"{user_info['first_name']} {user_info['last_name']}"
+        return f"@[id{user_id}|{user_info['first_name']} {user_info['last_name']}]"
     except:
-        return f"Игрок {user_id}"
+        return f"@[id{user_id}|Игрок]"
 
 def send_msg(peer_id, message, keyboard=None, reply_to=None):
     try:
@@ -510,14 +510,13 @@ async def main():
                         target_id = msg['reply_message']['from_id']
                     
                     if target_id == user_id:
-                        # ИСПРАВЛЕН ПРОФИЛЬ (в одну строку)
                         send_msg(peer_id, f"👤 Твой профиль:\n💰 Баланс: {get_balance(user_id)} монет\n🆔 ID: {user_id}", keyboard=get_main_kb() if is_ls else None, reply_to=reply_to_id)
                     else:
                         target_name = get_user_name(target_id)
                         target_bal = get_balance(target_id)
                         send_msg(peer_id, f"👤 Профиль {target_name}:\n💰 Баланс: {target_bal} монет\n🆔 ID: {target_id}", reply_to=reply_to_id)
                 
-                # ТОП (10 МЕСТ, БЕЗ ТЕГОВ)
+                # ТОП (10 МЕСТ, БЕЗ СЛОВА "МОНЕТ")
                 elif clean_text == "топ":
                     conn = sqlite3.connect(DB_FILE)
                     c = conn.cursor()
@@ -533,8 +532,7 @@ async def main():
                         
                         formatted_bal = f"{u_bal:,}".replace(",", ".")
                         
-                        # ИМЯ БЕЗ ТЕГОВ, БАЛАНС В ОДНУ СТРОКУ
-                        top_text += f"{i}. {u_name} — {formatted_bal} монет\n"
+                        top_text += f"{i}. {u_name} — {formatted_bal}\n"
                     
                     send_msg(peer_id, top_text, keyboard=get_main_kb() if is_ls else None, reply_to=reply_to_id)
 
