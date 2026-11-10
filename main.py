@@ -68,6 +68,7 @@ def process_roulette(user_id, peer_id, choice, bet_str, reply_to=None):
     balance = get_balance(user_id)
     bet_str_clean = bet_str.lower().replace("ё", "е")
     
+    # Разбор ставки
     if bet_str_clean in ["вб", "всё", "все"]:
         bet = balance
     elif bet_str_clean.isdigit():
@@ -129,7 +130,7 @@ def process_roulette(user_id, peer_id, choice, bet_str, reply_to=None):
     send_msg(peer_id, msg, get_main_kb(), reply_to=reply_to)
 
 # ===== ЗАПУСК =====
-print("БОТ ЗАПУЩЕН! ТЕСТ РУЛЕТКИ.")
+print("БОТ ЗАПУЩЕН! РУЛЕТКА РАБОТАЕТ.")
 
 while True:
     try:
@@ -181,12 +182,19 @@ while True:
                         )
                         send_msg(peer_id, rules_text, get_main_kb())
 
-                    # ЖЕСТКАЯ ПРОВЕРКА КОМАНДЫ (Ловит и "Рулетка", и "Рул")
-                    elif text_lower.startswith(("рулетка ", "рул ")):
+                    # ВОТ ГЛАВНОЕ ИСПРАВЛЕНИЕ. Теперь он ловит любую команду, где есть "рул" и цифра
+                    elif any(word in text_lower for word in ["рул", "ставка", "красн", "черн", "чет", "нечет"]):
+                        # Если это похоже на ставку, пытаемся её сыграть
                         parts = text_lower.replace("/", "").split()
-                        if len(parts) >= 3:
+                        if len(parts) >= 2:
+                            # Пытаемся найти ставку (последнее слово)
                             bet_str = parts[-1]
-                            choice = " ".join(parts[1:-1])
+                            choice = " ".join(parts[:-1]).replace("рул", "").replace("рулетка", "").strip()
+                            
+                            # Если не нашли choice (например, написали просто "Рулетка 5000")
+                            if not choice:
+                                choice = "красное" # По умолчанию ставим на красное
+                            
                             process_roulette(user_id, peer_id, choice, bet_str, reply_to=msg.get('id'))
                         else:
                             send_msg(peer_id, "❌ Формат: Рулетка красное 5000", get_main_kb())
@@ -202,11 +210,12 @@ while True:
 
                 # === БЕСЕДЫ ===
                 else:
-                    if text_lower.startswith(("/рулетка ", "/рул ")):
+                    if any(word in text_lower for word in ["рул", "ставка", "красн", "черн", "чет", "нечет"]):
                         parts = text_lower.replace("/", "").split()
-                        if len(parts) >= 3:
+                        if len(parts) >= 2:
                             bet_str = parts[-1]
-                            choice = " ".join(parts[1:-1])
+                            choice = " ".join(parts[:-1]).replace("рул", "").replace("рулетка", "").strip()
+                            if not choice: choice = "красное"
                             process_roulette(user_id, peer_id, choice, bet_str, reply_to=msg.get('id'))
 
     except Exception as e:
