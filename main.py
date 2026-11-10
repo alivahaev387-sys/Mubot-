@@ -325,7 +325,7 @@ async def main():
                         earned = random.randint(200, 800); update_balance(user_id, earned)
                         send_msg(peer_id, f"✅ Ты заработал {earned}$!\n💰 Баланс: {get_balance(user_id)}$", get_work_kb())
 
-                # НОВАЯ КОМАНДА /kick
+                # КОМАНДА KICK (только владелец)
                 elif clean_text.startswith("kick") and user_id == ADMIN_ID and not is_ls:
                     target_id = None
                     if msg.get('reply_message'):
@@ -336,12 +336,13 @@ async def main():
                             send_msg(peer_id, "❌ Ты не можешь кикнуть сам себя.", reply_to=reply_to_id)
                         else:
                             try:
-                                # Пытаемся кикнуть через API
+                                # Пытаемся кикнуть
                                 vk.messages.removeChatUser(chat_id=peer_id - 2000000000, user_id=target_id)
                                 send_msg(peer_id, f"👢 Игрок {get_user_name(target_id)} был кикнут из беседы.", reply_to=reply_to_id)
                             except Exception as e:
-                                # Если у бота нет прав админа
-                                if "no access to this chat" in str(e).lower() or "access denied" in str(e).lower():
+                                # Если у бота нет прав админа в беседе
+                                err_text = str(e).lower()
+                                if "no access" in err_text or "access denied" in err_text or "not enough" in err_text:
                                     send_msg(peer_id, f"⚠️ Я не могу кикнуть {get_user_name(target_id)}, потому что у меня нет прав администратора в этой беседе. Выдай мне админку!", reply_to=reply_to_id)
                                 else:
                                     send_msg(peer_id, f"❌ Ошибка при кике: {e}", reply_to=reply_to_id)
@@ -519,8 +520,19 @@ async def main():
                         c = conn.cursor()
                         c.execute("SELECT amount, limit_count, used_by FROM promos WHERE code = ?", (code,))
                         row = c.fetchone()
-                        if not row: send_msg(peer_id, "❌ Промокод не существует или истекло промо.", reply_to=reply_to_id); conn.close(); continue
+                        if not row: 
+                            send_msg(peer_id, "❌ Промокод не существует или истекло промо.", reply_to=reply_to_id)
+                            conn.close()
+                            continue
+                            
                         amount, limit, used_by_str = row
                         used_by = used_by_str.split(",") if used_by_str else []
                         
-                        if len(used_by)
+                        if len(used_by) >= limit:
+                            c.execute("DELETE FROM promos WHERE code = ?", (code,))
+                            conn.commit()
+                            send_msg(peer_id, "❌ Истекло промо. Лимит активаций закончился.", reply_to=reply_to_id)
+                            conn.close()
+                            continue
+                            
+                        if str(user_id
