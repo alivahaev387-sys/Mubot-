@@ -487,7 +487,51 @@ while True:
                             promo_list += f"▪️ `{r[0]}` — {r[1]}$ (Использовано: {used_count}/{r[2]})\n"
                         send_msg(peer_id, promo_list, reply_to=reply_to_id)
 
-                # 12. АКТИВАЦИЯ ПРОМОКОДА
+                # 12. ВЫДАЧА ДЕНЕГ (ТОЛЬКО В ЛС И ТОЛЬКО ДЛЯ ВЛАДЕЛЬЦА)
+                elif clean_text.startswith("выдать") and user_id == ADMIN_ID and is_ls:
+                    try:
+                        if len(parts) == 3 and parts[1] == "все":
+                            amount = int(parts[2])
+                            
+                            # Получаем всех из базы
+                            conn = sqlite3.connect(DB_FILE)
+                            c = conn.cursor()
+                            c.execute("SELECT user_id FROM users")
+                            all_users = c.fetchall()
+                            conn.close()
+                            
+                            if not all_users:
+                                send_msg(peer_id, "❌ База данных пуста.", reply_to=reply_to_id)
+                                continue
+                                
+                            for u in all_users:
+                                update_balance(u[0], amount)
+                                
+                            owner_name = get_user_name(user_id)
+                            msg_text = (
+                                f"💰 **Конфиденциальная выдача!**\n\n"
+                                f"👑 Владелец {owner_name} выдал всем участникам базы данных (всего: {len(all_users)}) по **{amount:,}$**!\n".replace(",", ".")
+                            )
+                            send_msg(peer_id, msg_text, reply_to=reply_to_id)
+                            
+                        elif len(parts) == 2 and parts[1].isdigit() and msg.get('reply_message'):
+                            amount = int(parts[1])
+                            target_id = msg['reply_message']['from_id']
+                            update_balance(target_id, amount)
+                            
+                            target_name = get_user_name(target_id)
+                            owner_name = get_user_name(user_id)
+                            msg_text = (
+                                f"💰 **Конфиденциальная выдача!**\n\n"
+                                f"👑 Владелец {owner_name} выдал игроку {target_name} сумму в размере **{amount:,}$**!\n".replace(",", ".")
+                            )
+                            send_msg(peer_id, msg_text, reply_to=reply_to_id)
+                        else:
+                            send_msg(peer_id, "❌ Формат: /выдать все 5000 или ответом /выдать 5000", reply_to=reply_to_id)
+                    except Exception as e:
+                        print(f"Ошибка выдачи: {e}")
+                        
+                # 13. АКТИВАЦИЯ ПРОМОКОДА
                 elif clean_text.startswith("promo"):
                     try:
                         code = parts[1]
