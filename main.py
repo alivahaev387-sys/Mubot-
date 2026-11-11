@@ -204,7 +204,6 @@ async def process_roulette(user_id, peer_id, choice, bet_str, reply_to=None, is_
         )
         
     kb = get_main_kb() if is_ls else None
-    # ОТПРАВЛЯЕМ ТОЛЬКО ТЕКСТ
     send_msg(peer_id, msg, keyboard=kb, reply_to=reply_to)
 
 async def process_fortune(user_id, peer_id, reply_to=None, is_ls=False):
