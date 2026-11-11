@@ -4,9 +4,9 @@ import json, random, time, os
 import sqlite3
 
 # ===== НАСТРОЙКИ =====
-TOKEN = "vk1.a.n-y1VnQMFI87cAGH7zXHwYy6LncLM_UuAaCihe6dlWxUBLGwS8no-KjRmFrA9zmwy-STfP7f2VZOHArq1-WVKYVRUA3H1F3-pO5gtXRxEziw3u3st-dTYHNiK_an2ZcbUIpXYNy98HHTGQv12wFtMLsSASQ0kO0ke0B0DRsXc7hn-LQrYcpbu54a_kQmP7dxBO5a8gTmuS9Dn9LH7oMLfE6G6_GPJZxJAgkwzptCnWw"
-GROUP_ID = 243089386
-ADMIN_ID = 200005093141 
+TOKEN = "ВАШ_ТОКЕН_ЗДЕСЬ" 
+GROUP_ID = 123456789      
+ADMIN_ID = 123456789      
 FORTUNA_CD = 600
 BONUS_CD = 600 
 
@@ -15,7 +15,8 @@ if not os.path.exists(DATA_DIR):
     os.makedirs(DATA_DIR)
 DB_FILE = os.path.join(DATA_DIR, "game.db")
 
-vk_session = vk_api.VkApi(token=TOKEN)
+# ВОТ ГЛАВНОЕ ИСПРАВЛЕНИЕ: Указываем новую версию API
+vk_session = vk_api.VkApi(token=TOKEN, api_version='5.131')
 longpoll = VkBotLongPoll(vk_session, GROUP_ID)
 vk = vk_session.get_api()
 
@@ -259,7 +260,12 @@ while True:
                 clean_text = text.replace("/", "").strip()
                 parts = clean_text.split()
                 
-                reply_to_id = msg.get('id')
+                # === ГЛАВНОЕ ИСПРАВЛЕНИЕ РЕПЛАЯ ===
+                # Для бесед нужен conversation_message_id, для ЛС - id
+                if is_ls:
+                    reply_to_id = msg.get('id')
+                else:
+                    reply_to_id = msg.get('conversation_message_id')
 
                 if not text and is_ls:
                     send_msg(peer_id, f"👋 Привет! Твой баланс: {balance}$\nЖми «Работа» или пиши /help", get_main_kb(), reply_to=reply_to_id)
