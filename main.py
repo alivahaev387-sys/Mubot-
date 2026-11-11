@@ -3,7 +3,7 @@ from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
 import json, random, time, os
 import sqlite3
 
-# ===== НАСТРОЙКИ (ТВОИ ДАННЫЕ ВСТАВЛЕНЫ) =====
+# ===== НАСТРОЙКИ (ТВОЙ ОРИГИНАЛЬНЫЙ ТОКЕН) =====
 TOKEN = "vk1.a.n-y1VnQMFI87cAGH7zXHwYy6LncLM_UuAaCihe6dlWxUBLGwS8no-KjRmFrA9zmwy-STfP7f2VZOHArq1-WVKYVRUA3H1F3-pO5gtXRxEziw3u3st-dTYHNiK_an2ZcbUIpXYNy98HHTGQv12wFtMLsSASQ0kO0ke0B0DRsXc7hn-LQrYcpbu54a_kQmP7dxBO5a8gTmuS9Dn9LH7oMLfE6G6_GPJZxJAgkwzptCnWw"
 GROUP_ID = 243089386
 ADMIN_ID = 200005093141 
@@ -73,20 +73,22 @@ def get_user_name(user_id):
     except:
         return f"[id{user_id}|Игрок]"
 
-# ===== ОТПРАВКА С ЖЕСТКИМ РЕПЛАЕМ =====
+# ===== ОТПРАВКА С ЖЕСТКИМ РЕПЛАЕМ (ЧЕРЕЗ vk.method) =====
 def send_msg(peer_id, message, keyboard=None, reply_to=None):
     try:
         params = {
             'peer_id': peer_id, 
             'message': message, 
             'random_id': random.randint(1, 2**31 - 1),
-            'v': '5.131'  # Принудительно новейшая версия для реплаев
+            'v': '5.131'
         }
         if keyboard: params['keyboard'] = keyboard
         if reply_to: 
-            params['reply_to'] = int(reply_to) # ВК требует int
+            params['reply_to'] = int(reply_to)
+            
         params['disable_mentions'] = 1 
-        return vk.messages.send(**params)
+        
+        return vk.method('messages.send', params)
     except Exception as e:
         print(f"Ошибка отправки: {e}")
 
@@ -99,7 +101,7 @@ def edit_msg(peer_id, cm_id, message, keyboard=None):
             'v': '5.131'
         }
         if keyboard: params['keyboard'] = keyboard
-        vk.messages.edit(**params)
+        vk.method('messages.edit', params)
     except Exception as e:
         print(f"Ошибка редактирования: {e}")
 
