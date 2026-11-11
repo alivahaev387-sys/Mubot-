@@ -21,9 +21,12 @@ vk = vk_session.get_api()
 
 print("--- БОТ ЗАПУЩЕН УСПЕШНО ---")
 
-# ===== БАЗА ДАННЫХ =====
+# ===== БАЗА ДАННЫХ (ЗАЩИТА ОТ БЛОКИРОВОК) =====
+def get_db():
+    return sqlite3.connect(DB_FILE, timeout=15, check_same_thread=False)
+
 def init_db():
-    conn = sqlite3.connect(DB_FILE)
+    conn = get_db()
     c = conn.cursor()
     c.execute("CREATE TABLE IF NOT EXISTS users (user_id TEXT PRIMARY KEY, balance INTEGER DEFAULT 1000)")
     c.execute("CREATE TABLE IF NOT EXISTS promos (code TEXT PRIMARY KEY, amount INTEGER, limit_count INTEGER, used_by TEXT DEFAULT '')")
@@ -35,26 +38,33 @@ def init_db():
     conn.close()
 
 def get_balance(user_id):
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute("SELECT balance FROM users WHERE user_id = ?", (str(user_id),))
-    row = c.fetchone()
-    if not row:
-        c.execute("INSERT INTO users (user_id, balance) VALUES (?, 1000)", (str(user_id),))
-        conn.commit()
-        bal = 1000
-    else:
-        bal = row[0]
-    conn.close()
-    return bal
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        c.execute("SELECT balance FROM users WHERE user_id = ?", (str(user_id),))
+        row = c.fetchone()
+        if not row:
+            c.execute("INSERT INTO users (user_id, balance) VALUES (?, 1000)", (str(user_id),))
+            conn.commit()
+            bal = 1000
+        else:
+            bal = row[0]
+        conn.close()
+        return bal
+    except Exception as e:
+        print(f"DB Error get_balance: {e}")
+        return 1000
 
 def update_balance(user_id, amount):
-    bal = get_balance(user_id)
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute("UPDATE users SET balance = ? WHERE user_id = ?", (bal + amount, str(user_id)))
-    conn.commit()
-    conn.close()
+    try:
+        bal = get_balance(user_id)
+        conn = get_db()
+        c = conn.cursor()
+        c.execute("UPDATE users SET balance = ? WHERE user_id = ?", (bal + amount, str(user_id)))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"DB Error update_balance: {e}")
 
 def get_user_name(user_id):
     try:
@@ -132,7 +142,7 @@ while True:
                 
                 if payload.get("cmd") == "duel_accept":
                     duel_id = payload.get("duel_id")
-                    conn = sqlite3.connect(DB_FILE)
+                    conn = get_db()
                     c = conn.cursor()
                     c.execute("SELECT challenger, bet, peer_id FROM active_duels WHERE msg_id = ?", (duel_id,))
                     row = c.fetchone()
@@ -167,7 +177,7 @@ while True:
                 
                 if payload.get("cmd") == "mines_set":
                     game_id, mine_count = payload["game_id"], payload["count"]
-                    conn = sqlite3.connect(DB_FILE)
+                    conn = get_db()
                     c = conn.cursor()
                     c.execute("SELECT bet FROM games WHERE game_id = ? AND user_id = ?", (game_id, str(user_id)))
                     row = c.fetchone()
@@ -184,7 +194,7 @@ while True:
                 
                 elif payload.get("cmd") == "mines_click":
                     game_id, cell = payload["game_id"], payload["cell"]
-                    conn = sqlite3.connect(DB_FILE)
+                    conn = get_db()
                     c = conn.cursor()
                     c.execute("SELECT bet, mines, opened, multiplier FROM games WHERE game_id = ? AND user_id = ?", (game_id, str(user_id)))
                     row = c.fetchone()
@@ -221,7 +231,7 @@ while True:
                 
                 elif payload.get("cmd") == "mines_cashout":
                     game_id = payload["game_id"]
-                    conn = sqlite3.connect(DB_FILE)
+                    conn = get_db()
                     c = conn.cursor()
                     c.execute("SELECT bet, multiplier FROM games WHERE game_id = ? AND user_id = ?", (game_id, str(user_id)))
                     row = c.fetchone()
@@ -249,7 +259,6 @@ while True:
                 clean_text = text.replace("/", "").strip()
                 parts = clean_text.split()
                 
-                # === ИСПРАВЛЕНИЕ: глобальный message_id для reply_to ===
                 reply_to_id = msg.get('id')
 
                 if not text and is_ls:
@@ -284,7 +293,7 @@ while True:
                 
                 # 4. ТОП
                 elif clean_text == "топ":
-                    conn = sqlite3.connect(DB_FILE)
+                    conn = get_db()
                     c = conn.cursor()
                     c.execute("SELECT user_id, balance FROM users WHERE balance > 2 ORDER BY balance DESC LIMIT 10")
                     rows = c.fetchall()
@@ -358,7 +367,7 @@ while True:
                 elif clean_text.startswith("фортуна"):
                     uid = str(user_id)
                     current_time = int(time.time())
-                    conn = sqlite3.connect(DB_FILE)
+                    conn = get_db()
                     c = conn.cursor()
                     c.execute("SELECT last_used FROM fortune_cd WHERE user_id = ?", (uid,))
                     row = c.fetchone()
@@ -386,7 +395,7 @@ while True:
                 elif clean_text == "бонус":
                     uid = str(user_id)
                     current_time = int(time.time())
-                    conn = sqlite3.connect(DB_FILE)
+                    conn = get_db()
                     c = conn.cursor()
                     c.execute("SELECT last_used FROM bonus_cd WHERE user_id = ?", (uid,))
                     row = c.fetchone()
@@ -422,7 +431,7 @@ while True:
                             continue
                             
                         duel_id = str(random.randint(10000, 99999))
-                        conn = sqlite3.connect(DB_FILE)
+                        conn = get_db()
                         c = conn.cursor()
                         c.execute("REPLACE INTO active_duels (msg_id, challenger, bet, peer_id) VALUES (?, ?, ?, ?)", (duel_id, str(user_id), bet, str(peer_id)))
                         conn.commit()
@@ -439,20 +448,25 @@ while True:
                     else:
                         send_msg(peer_id, "❌ Формат: /duel [сумма] (от 50 до 2000)", reply_to=reply_to_id)
                 
-                # 9. МИНЫ
+                # 9. МИНЫ (Автоматическая ставка 100, если не указана)
                 elif clean_text.startswith("мины"):
                     if len(parts) >= 2:
                         bet_str = parts[1]
                         bet = get_balance(user_id) if bet_str in ["все", "вб", "всё"] else int(bet_str) if bet_str.isdigit() else int(bet_str[:-1]) * 1000 if bet_str.endswith("к") and bet_str[:-1].isdigit() else 0
-                        if bet < 10 or bet > get_balance(user_id): send_msg(peer_id, f"❌ Мин. ставка 10, у тебя {get_balance(user_id)}$", reply_to=reply_to_id); continue
-                        game_id = str(random.randint(10000, 99999))
-                        conn = sqlite3.connect(DB_FILE)
-                        c = conn.cursor()
-                        c.execute("INSERT INTO games (game_id, user_id, bet, mines, opened, multiplier) VALUES (?, ?, ?, '[]', '[]', 1.0)", (game_id, str(user_id), bet))
-                        conn.commit()
-                        conn.close()
-                        send_msg(peer_id, f"💣 Мины\nСтавка: {bet}$\n\nВыберите количество мин (2-8):", get_mines_count_kb(game_id), reply_to=reply_to_id)
-                    else: send_msg(peer_id, "❌ Формат: /мины 500", reply_to=reply_to_id)
+                    else:
+                        bet = 100 # Ставка по умолчанию
+                    
+                    if bet < 10 or bet > get_balance(user_id): 
+                        send_msg(peer_id, f"❌ Мин. ставка 10, у тебя {get_balance(user_id)}$", reply_to=reply_to_id)
+                        continue
+                    
+                    game_id = str(random.randint(10000, 99999))
+                    conn = get_db()
+                    c = conn.cursor()
+                    c.execute("INSERT INTO games (game_id, user_id, bet, mines, opened, multiplier) VALUES (?, ?, ?, '[]', '[]', 1.0)", (game_id, str(user_id), bet))
+                    conn.commit()
+                    conn.close()
+                    send_msg(peer_id, f"💣 Мины\nСтавка: {bet}$\n\nВыберите количество мин (2-8):", get_mines_count_kb(game_id), reply_to=reply_to_id)
 
                 # 10. СОЗДАНИЕ ПРОМОКОДА
                 elif (clean_text.startswith("создать") or clean_text.startswith("промокод")) and user_id == ADMIN_ID:
@@ -465,7 +479,7 @@ while True:
                     else:
                         send_msg(peer_id, "❌ Формат: /промокод код сумма [лимит]", reply_to=reply_to_id)
                         continue
-                    conn = sqlite3.connect(DB_FILE)
+                    conn = get_db()
                     c = conn.cursor()
                     c.execute("REPLACE INTO promos (code, amount, limit_count, used_by) VALUES (?, ?, ?, '')", (code, int(amount), limit))
                     conn.commit()
@@ -474,7 +488,7 @@ while True:
 
                 # 11. ПРОМОЛИСТ
                 elif clean_text == "промолист":
-                    conn = sqlite3.connect(DB_FILE)
+                    conn = get_db()
                     c = conn.cursor()
                     c.execute("SELECT code, amount, limit_count, used_by FROM promos")
                     rows = c.fetchall()
@@ -491,10 +505,9 @@ while True:
                 # 12. ВЫДАЧА ДЕНЕГ (ТОЛЬКО В ЛС И ТОЛЬКО ДЛЯ ВЛАДЕЛЬЦА)
                 elif (clean_text.startswith("выдать") or clean_text.startswith("выдал")) and user_id == ADMIN_ID and is_ls:
                     try:
-                        # Формат: /выдать беседа все 5900
                         if len(parts) == 4 and parts[1] == "беседа" and parts[2] == "все":
                             amount = int(parts[3])
-                            conn = sqlite3.connect(DB_FILE)
+                            conn = get_db()
                             c = conn.cursor()
                             c.execute("SELECT user_id FROM users")
                             all_users = c.fetchall()
@@ -514,8 +527,7 @@ while True:
                                     )
                                     send_msg(u[0], msg_to_user)
                                 except Exception as e:
-                                    if "901" not in str(e):
-                                        print(f"Ошибка ЛС для {u[0]}: {e}")
+                                    if "901" not in str(e): print(f"Ошибка ЛС для {u[0]}: {e}")
                                 
                             owner_name = get_user_name(user_id)
                             msg_text = (
@@ -524,10 +536,9 @@ while True:
                             )
                             send_msg(peer_id, msg_text, reply_to=reply_to_id)
                             
-                        # Формат: /выдать все 5900
                         elif len(parts) == 3 and parts[1] == "все":
                             amount = int(parts[2])
-                            conn = sqlite3.connect(DB_FILE)
+                            conn = get_db()
                             c = conn.cursor()
                             c.execute("SELECT user_id FROM users")
                             all_users = c.fetchall()
@@ -547,8 +558,7 @@ while True:
                                     )
                                     send_msg(u[0], msg_to_user)
                                 except Exception as e:
-                                    if "901" not in str(e):
-                                        print(f"Ошибка ЛС для {u[0]}: {e}")
+                                    if "901" not in str(e): print(f"Ошибка ЛС для {u[0]}: {e}")
                                 
                             owner_name = get_user_name(user_id)
                             msg_text = (
@@ -557,7 +567,6 @@ while True:
                             )
                             send_msg(peer_id, msg_text, reply_to=reply_to_id)
                             
-                        # Выдача одному человеку реплаем
                         elif len(parts) == 2 and parts[1].isdigit() and msg.get('reply_message'):
                             amount = int(parts[1])
                             target_id = msg['reply_message']['from_id']
@@ -579,7 +588,7 @@ while True:
                 elif clean_text.startswith("promo"):
                     try:
                         code = parts[1]
-                        conn = sqlite3.connect(DB_FILE)
+                        conn = get_db()
                         c = conn.cursor()
                         c.execute("SELECT amount, limit_count, used_by FROM promos WHERE code = ?", (code,))
                         row = c.fetchone()
