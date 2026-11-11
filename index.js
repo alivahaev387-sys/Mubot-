@@ -56,7 +56,6 @@ async function updateBalance(userId, amount) {
     await dbRun("UPDATE users SET balance = ? WHERE user_id = ?", [bal + amount, String(userId)]);
 }
 
-// П.6: Синий ник (кликабельный), но без тега (благодаря disable_mentions)
 async function getFullName(userId) {
     try {
         const [user] = await vk.api.users.get({ user_ids: userId });
@@ -78,55 +77,53 @@ const getDuelKb = (duelId) => Keyboard.builder().inline().callbackButton({
     label: '⚔️ Сразиться',
     payload: { cmd: 'duel_accept', duel_id: duelId },
     color: Keyboard.POSITIVE_COLOR
-});
+}).toString();
 
-// Клавиатура для выбора количества мин
+// ИСПРАВЛЕНИЕ: Разбиваем кнопки мин на ряды (макс 5 в ряд, но сделаем по 4 для красоты)
 const getMinesCountKb = (gameId) => {
     const kb = Keyboard.builder().inline();
+    let count = 0;
     for (let i = 2; i <= 8; i++) {
-        kb.callbackButton({ label: `${i} 💣`, payload: { cmd: 'mines_set', gameId, count: i }, color: Keyboard.SECONDARY_COLOR });
+        kb.callbackButton({ label: `${i} 💣`, payload: { cmd: 'mines_set', gameId: String(gameId), count: i }, color: Keyboard.SECONDARY_COLOR });
+        count++;
+        if (count % 4 === 0 && i !== 8) kb.row();
     }
-    return kb;
+    return kb.toString();
 };
 
-// П.2: Исправленная клавиатура мин (callback вместо textButton)
+// ИСПРАВЛЕНИЕ: Поле мин (3x3) и кнопка забрать, приведено к строке
 const getMinesFieldKb = (gameId, opened, mines) => {
     const kb = Keyboard.builder().inline();
     for (let i = 1; i <= 9; i++) {
         if (opened.includes(i)) {
             kb.callbackButton({ 
                 label: mines.includes(i) ? '💥' : '💎', 
-                payload: { cmd: 'none' }, // Заглушка, чтобы кнопка не исчезала
+                payload: { cmd: 'none' }, 
                 color: mines.includes(i) ? Keyboard.NEGATIVE_COLOR : Keyboard.POSITIVE_COLOR 
             });
         } else {
             kb.callbackButton({ 
                 label: String(i), 
-                payload: { cmd: 'mines_click', gameId, cell: i }, 
+                payload: { cmd: 'mines_click', gameId: String(gameId), cell: i }, 
                 color: Keyboard.SECONDARY_COLOR 
             });
         }
         if (i % 3 === 0) kb.row();
     }
-    kb.callbackButton({ label: '💰 Забрать', payload: { cmd: 'mines_cashout', gameId }, color: Keyboard.POSITIVE_COLOR });
-    return kb;
+    kb.callbackButton({ label: '💰 Забрать', payload: { cmd: 'mines_cashout', gameId: String(gameId) }, color: Keyboard.POSITIVE_COLOR });
+    return kb.toString();
 };
 
 // ===== ОБРАБОТКА СООБЩЕНИЙ =====
 vk.updates.on('message_new', async (message) => {
     if (message.isOutbox) return;
-    
-    // П.1: Игнорируем сообщения от других ботов и сообществ (у них ID меньше нуля)
-    if (message.senderId < 0) return;
+    if (message.senderId < 0) return; // Игнор сообществ
 
     try {
         const text = message.text ? message.text.trim().toLowerCase() : '';
         if (!text) return;
 
-        // П.4: Делаем все команды через / (кроме кнопки "Работа")
-        if (!text.startsWith('/') && text !== '💼 работа') {
-            return; 
-        }
+        if (!text.startsWith('/') && text !== '💼 работа') return;
 
         const cleanText = text.replace(/\//g, '').trim();
         const parts = cleanText.split(/\s+/);
@@ -137,18 +134,16 @@ vk.updates.on('message_new', async (message) => {
         const balance = await getBalance(userId);
 
         const replyParams = (kb = undefined) => {
-            const p = { disable_mentions: 1 }; // П.6: Отключаем белые галочки
+            const p = { disable_mentions: 1 };
             if (kb) p.keyboard = kb;
             return p;
         };
 
         // --- КОМАНДЫ ---
-
         if (text.includes('начать') || text.includes('start')) {
             return await message.reply("👋 Привет! Я игровой бот. Выбирай действие на клавиатуре или напиши /help.", replyParams(isLs ? mainKb : undefined));
         }
 
-        // П.5: Убрал работу из хелпа
         if (text.includes('help') || text.includes('помощь') || text.includes('команды')) {
             const helpText = "📖 Команды:\n🎰 /рулетка [цвет/чет] [ставка]\n🎲 /фортуна (100$)\n💣 /мины [ставка]\n⚔️ /duel [сумма]\n💸 /transfer [сумма] (ответом на сообщение)\n🎁 /бонус\n🎁 /promo [код]\n📜 /промолист\n👤 /профиль\n🏆 /топ";
             return await message.reply(helpText, replyParams(isLs ? mainKb : undefined));
@@ -177,7 +172,7 @@ vk.updates.on('message_new', async (message) => {
             for (const r of rows) {
                 if (count >= 10) break;
                 const uInfo = usersInfo.find(u => u.id == r.user_id);
-                if (uInfo && !uInfo.deactivated) { // П.3: Пропускаем заблокированных
+                if (uInfo && !uInfo.deactivated) {
                     count++;
                     topText += `${count}. [id${uInfo.id}|${uInfo.first_name} ${uInfo.last_name || ''}] — ${formatMoney(r.balance)}$\n`;
                 }
@@ -238,7 +233,6 @@ vk.updates.on('message_new', async (message) => {
             return await message.reply(`🎰 Выпало: ${formatMoney(prize)}$!\n💰 Баланс: ${formatMoney(await getBalance(userId))}$`, replyParams(isLs ? mainKb : undefined));
         }
 
-        // П.2: Мины теперь запускаются
         if (cleanText.startsWith('мины')) {
             let bet = 100;
             if (parts.length >= 2) {
@@ -254,7 +248,6 @@ vk.updates.on('message_new', async (message) => {
             return await message.reply(`💣 Мины\nСтавка: ${bet}$\n\nВыберите количество мин (2-8):`, replyParams(getMinesCountKb(gameId)));
         }
 
-        // П.3: Перевод денег
         if (cleanText.startsWith('transfer') || cleanText.startsWith('перевод')) {
             if (parts.length >= 2 && !isNaN(parts[1]) && message.hasReplyMessage) {
                 const amount = parseInt(parts[1]);
