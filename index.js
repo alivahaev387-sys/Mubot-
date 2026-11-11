@@ -90,7 +90,6 @@ const getMinesCountKb = (gameId) => {
     return kb.toString();
 };
 
-// ИСПРАВЛЕНИЕ П.1: Добавлен параметр isGameOver (по умолчанию false)
 const getMinesFieldKb = (gameId, opened, mines, isGameOver = false) => {
     const kb = Keyboard.builder().inline();
     for (let i = 1; i <= 9; i++) {
@@ -103,7 +102,6 @@ const getMinesFieldKb = (gameId, opened, mines, isGameOver = false) => {
         } else {
             kb.callbackButton({ 
                 label: String(i), 
-                // Если игра окончена, кнопки становятся неактивными заглушками
                 payload: isGameOver ? { cmd: 'none' } : { cmd: 'mines_click', gameId: String(gameId), cell: String(i) }, 
                 color: Keyboard.SECONDARY_COLOR 
             });
@@ -111,7 +109,6 @@ const getMinesFieldKb = (gameId, opened, mines, isGameOver = false) => {
         if (i % 3 === 0) kb.row();
     }
     
-    // Если игра НЕ окончена, добавляем кнопку "Забрать"
     if (!isGameOver) {
         kb.callbackButton({ label: '💰 Забрать', payload: { cmd: 'mines_cashout', gameId: String(gameId) }, color: Keyboard.POSITIVE_COLOR });
     }
@@ -408,7 +405,12 @@ vk.updates.on('message_event', async (context) => {
                 const msgText = `⚔️ Дуэль завершена!\n\n🏆 Победитель: ${winnerName}\n❌ Проигравший: ${loserName}\n\n💰 Выигрыш: ${prize}$`;
                 
                 await context.answer({ type: 'show_snackbar', text: '⚔️ Дуэль завершена!' });
-                await context.editMessage({ message: msgText, keyboard: null });
+                await vk.api.messages.edit({
+                    peer_id: context.peerId,
+                    conversation_message_id: context.conversationMessageId,
+                    message: msgText,
+                    keyboard: null
+                });
                 return;
             }
         }
@@ -417,8 +419,13 @@ vk.updates.on('message_event', async (context) => {
             const gameId = String(payload.gameId);
             const count = Number(payload.count);
             
-            const row = await dbGet("SELECT bet FROM games WHERE game_id = ? AND user_id = ?", [gameId, String(userId)]);
+            const row = await dbGet("SELECT bet, mines FROM games WHERE game_id = ? AND user_id = ?", [gameId, String(userId)]);
             if (row) {
+                // Защита от повторного нажатия
+                if (row.mines && row.mines !== '[]') {
+                    return await context.answer({ type: 'show_snackbar', text: '❌ Игра уже началась!' });
+                }
+
                 const minesArr = [];
                 while(minesArr.length < count) {
                     const r = Math.floor(Math.random() * 9) + 1;
@@ -429,9 +436,19 @@ vk.updates.on('message_event', async (context) => {
                 
                 const msgText = `💣 Мины\nСтавка: ${row.bet}$ | Мин: ${count} из 9\n\nВыбери клетку, чтобы открыть алмаз 💎`;
                 
+                // Отвечаем на кнопку
                 await context.answer({ type: 'show_snackbar', text: 'Игра началась!' });
-                await context.editMessage({ message: msgText, keyboard: getMinesFieldKb(gameId, [], minesArr) });
+                
+                // Прямой вызов API для обновления сообщения
+                await vk.api.messages.edit({
+                    peer_id: context.peerId,
+                    conversation_message_id: context.conversationMessageId,
+                    message: msgText,
+                    keyboard: getMinesFieldKb(gameId, [], minesArr)
+                });
                 return;
+            } else {
+                return await context.answer({ type: 'show_snackbar', text: '❌ Игра не найдена.' });
             }
         }
 
@@ -442,6 +459,11 @@ vk.updates.on('message_event', async (context) => {
             const row = await dbGet("SELECT bet, mines, opened, multiplier FROM games WHERE game_id = ? AND user_id = ?", [gameId, String(userId)]);
             
             if (row) {
+                // Если мины еще не сгенерированы
+                if (!row.mines || row.mines === '[]') {
+                    return await context.answer({ type: 'show_snackbar', text: '❌ Сначала выберите количество мин!' });
+                }
+
                 const bet = row.bet;
                 const mines = JSON.parse(row.mines);
                 const opened = JSON.parse(row.opened);
@@ -457,8 +479,13 @@ vk.updates.on('message_event', async (context) => {
                     const msgText = `💥 Вы попали на мину!\n\nПроигрыш: -${bet}$\nБаланс: ${formatMoney(await getBalance(userId))}$`;
                     
                     await context.answer({ type: 'show_snackbar', text: '💥 БУМ! Вы проиграли.' });
-                    // ИСПРАВЛЕНИЕ П.1: Передаем true, чтобы убрать кнопку "Забрать"
-                    await context.editMessage({ message: msgText, keyboard: getMinesFieldKb(gameId, Array.from({length: 9}, (_, i) => i + 1), mines, true) });
+                    
+                    await vk.api.messages.edit({
+                        peer_id: context.peerId,
+                        conversation_message_id: context.conversationMessageId,
+                        message: msgText,
+                        keyboard: getMinesFieldKb(gameId, Array.from({length: 9}, (_, i) => i + 1), mines, true)
+                    });
                     return;
                 }
 
@@ -474,25 +501,42 @@ vk.updates.on('message_event', async (context) => {
                 const msgText = `💣 Мины\nСтавка: ${bet}$ | Мин: ${mines.length} из 9\n\nОткрыто алмазов: ${opened.length} | Коэф: x${newMult}\nВыигрыш сейчас: ${winAmount}$`;
                 
                 await context.answer({ type: 'show_snackbar', text: `💎 Алмаз! x${newMult}` });
-                await context.editMessage({ message: msgText, keyboard: getMinesFieldKb(gameId, opened, mines) });
+                
+                await vk.api.messages.edit({
+                    peer_id: context.peerId,
+                    conversation_message_id: context.conversationMessageId,
+                    message: msgText,
+                    keyboard: getMinesFieldKb(gameId, opened, mines)
+                });
                 return;
+            } else {
+                return await context.answer({ type: 'show_snackbar', text: '❌ Игра не найдена или уже завершена.' });
             }
         }
 
         if (payload.cmd === 'mines_cashout') {
             const gameId = String(payload.gameId);
-            const row = await dbGet("SELECT bet, multiplier FROM games WHERE game_id = ? AND user_id = ?", [gameId, String(userId)]);
+            const row = await dbGet("SELECT bet, multiplier, mines FROM games WHERE game_id = ? AND user_id = ?", [gameId, String(userId)]);
             
             if (row) {
+                if (!row.mines || row.mines === '[]') {
+                    return await context.answer({ type: 'show_snackbar', text: '❌ Игра еще не началась!' });
+                }
+
                 const winAmount = Math.floor(row.bet * row.multiplier);
                 await updateBalance(userId, winAmount);
                 await dbRun("DELETE FROM games WHERE game_id = ?", [gameId]);
                 
-                // ИСПРАВЛЕНИЕ П.2: Сначала отвечаем на кнопку (убирает загрузку), потом редактируем
-                await context.answer({ type: 'show_snackbar', text: '💰 Деньги у вас!' });
+                await context.answer({ type: 'show_snackbar', text: `💰 Вы забрали ${winAmount}$!` });
                 
                 const msgText = `💰 Вы забрали выигрыш: ${winAmount}$!\nБаланс: ${formatMoney(await getBalance(userId))}$`;
-                await context.editMessage({ message: msgText, keyboard: null });
+                
+                await vk.api.messages.edit({
+                    peer_id: context.peerId,
+                    conversation_message_id: context.conversationMessageId,
+                    message: msgText,
+                    keyboard: null
+                });
                 return;
             } else {
                 return await context.answer({ type: 'show_snackbar', text: '❌ Игра не найдена или уже завершена.' });
