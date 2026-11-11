@@ -1,10 +1,12 @@
 {
   "name": "vk-game-bot",
   "version": "1.0.0",
-  "description": "VK Game Bot on vk-io",
   "main": "index.js",
+  "engines": {
+    "node": "20.x"
+  },
   "dependencies": {
-    "vk-io": "^4.9.0",
+    "vk-io": "^5.0.0",
     "sqlite3": "^5.1.7"
   }
 }
