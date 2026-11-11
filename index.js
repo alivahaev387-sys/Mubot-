@@ -3,13 +3,15 @@ const sqlite3 = require('sqlite3').verbose();
 const fs = require('fs');
 const path = require('path');
 
+// ===== ПРОВЕРКА ВЕРСИИ =====
 console.log("=========================================");
 console.log("ВЕРСИЯ NODE.JS:", process.version);
 console.log("=========================================");
 
-const TOKEN = "vk1.a.c1YiC8Y5P5tz8h0AmQdKDJYepilUUC2ew3Krh6kx-nr_w65VYJruj2pfXkcXSWutUwvCqTwCb8MLEMTQnOSNZrCqx1Jh-TaPwF_gEsZOAiq3-g6cJk8RbaOmOqJr3de3-iURXc1pAW2WzI0CvYvu-OPQmAdky5hCe2LrcgqrmHgtAht5gigIedBl29vM_CzjydlVS6y93BGtJnIPzpXb48ciC_kW7yERkY1RL2P_LGQ";
+// ===== НАСТРОЙКИ (ТВОЙ НОВЫЙ ТОКЕН) =====
+const TOKEN = "vk1.a.BvMZnZvhxLsOu5bIQ1IUIIoYMEW3T88NqEAcRZ17Yj-T46O-viFXkUPWky-4XBwNZAKsWhcwqAt3TDMqQmcKva0ckucYDEUvFKa_p_LJ9ig-zNIPv7cHSZV9KP4S8XLgO0m32YWDLuqfz-rqgrrhoFKZ0mexTvf71NQ5G1JVI0H7QtuL4HGdtQkAvT7Up8xnC-vaO3QTue9x8V5a3u1-DuwMwEXIvfB4OgnVo0_FXGI";
 const ADMIN_ID = 200005093141;
-const BONUS_CD = 600; 
+const BONUS_CD = 600; // 10 минут
 
 const vk = new VK({ token: TOKEN, apiVersion: '5.131' });
 
@@ -72,14 +74,15 @@ const getDuelKb = (duelId) => Keyboard.builder().inline().callbackButton({
 
 // ===== ОБРАБОТКА СООБЩЕНИЙ =====
 vk.updates.on('message_new', async (message) => {
-    // Отсекаем сообщения от самого бота
+    // Если сообщение от самого бота - пропускаем
     if (message.isOutbox) return;
 
     try {
         const text = message.text ? message.text.trim().toLowerCase() : '';
         if (!text) return;
 
-        console.log(`[ПОЛУЧЕНО] От: ${message.senderId} | Текст: ${text}`);
+        // ЛОГ: сообщение дошло до бота
+        console.log(`\n[ПОЛУЧЕНО] Чат: ${message.peerId} | От: ${message.senderId} | Текст: ${text}`);
 
         const cleanText = text.replace(/\//g, '');
         const parts = cleanText.split(/\s+/);
@@ -250,12 +253,9 @@ vk.updates.on('message_new', async (message) => {
 
     } catch (error) {
         console.error("КРИТИЧЕСКАЯ ОШИБКА ПРИ ОБРАБОТКЕ:", error);
-        // Отправляем ошибку в чат, чтобы ты видел, что происходит
         try {
             await message.reply(`⚠️ Ошибка на стороне бота:\n${error.message}`);
-        } catch (e) {
-            console.error("Не удалось отправить сообщение об ошибке:", e);
-        }
+        } catch (e) {}
     }
 });
 
