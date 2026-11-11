@@ -23,37 +23,46 @@ print("--- БОТ ЗАПУЩЕН УСПЕШНО ---")
 
 # ===== БАЗА ДАННЫХ =====
 def init_db():
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute("CREATE TABLE IF NOT EXISTS users (user_id TEXT PRIMARY KEY, balance INTEGER DEFAULT 1000)")
-    c.execute("CREATE TABLE IF NOT EXISTS promos (code TEXT PRIMARY KEY, amount INTEGER, limit_count INTEGER, used_by TEXT DEFAULT '')")
-    c.execute("CREATE TABLE IF NOT EXISTS fortune_cd (user_id TEXT PRIMARY KEY, last_used INTEGER)")
-    c.execute("CREATE TABLE IF NOT EXISTS bonus_cd (user_id TEXT PRIMARY KEY, last_used INTEGER)")
-    c.execute("CREATE TABLE IF NOT EXISTS active_duels (msg_id TEXT PRIMARY KEY, challenger TEXT, bet INTEGER, peer_id TEXT)")
-    conn.commit()
-    conn.close()
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        c = conn.cursor()
+        c.execute("CREATE TABLE IF NOT EXISTS users (user_id TEXT PRIMARY KEY, balance INTEGER DEFAULT 1000)")
+        c.execute("CREATE TABLE IF NOT EXISTS promos (code TEXT PRIMARY KEY, amount INTEGER, limit_count INTEGER, used_by TEXT DEFAULT '')")
+        c.execute("CREATE TABLE IF NOT EXISTS fortune_cd (user_id TEXT PRIMARY KEY, last_used INTEGER)")
+        c.execute("CREATE TABLE IF NOT EXISTS bonus_cd (user_id TEXT PRIMARY KEY, last_used INTEGER)")
+        c.execute("CREATE TABLE IF NOT EXISTS active_duels (msg_id TEXT PRIMARY KEY, challenger TEXT, bet INTEGER, peer_id TEXT)")
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Ошибка БД: {e}")
 
 def get_balance(user_id):
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute("SELECT balance FROM users WHERE user_id = ?", (str(user_id),))
-    row = c.fetchone()
-    if not row:
-        c.execute("INSERT INTO users (user_id, balance) VALUES (?, 1000)", (str(user_id),))
-        conn.commit()
-        bal = 1000
-    else:
-        bal = row[0]
-    conn.close()
-    return bal
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        c = conn.cursor()
+        c.execute("SELECT balance FROM users WHERE user_id = ?", (str(user_id),))
+        row = c.fetchone()
+        if not row:
+            c.execute("INSERT INTO users (user_id, balance) VALUES (?, 1000)", (str(user_id),))
+            conn.commit()
+            bal = 1000
+        else:
+            bal = row[0]
+        conn.close()
+        return bal
+    except:
+        return 1000
 
 def update_balance(user_id, amount):
-    bal = get_balance(user_id)
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute("UPDATE users SET balance = ? WHERE user_id = ?", (bal + amount, str(user_id)))
-    conn.commit()
-    conn.close()
+    try:
+        bal = get_balance(user_id)
+        conn = sqlite3.connect(DB_FILE)
+        c = conn.cursor()
+        c.execute("UPDATE users SET balance = ? WHERE user_id = ?", (bal + amount, str(user_id)))
+        conn.commit()
+        conn.close()
+    except:
+        pass
 
 def get_user_name(user_id):
     try:
