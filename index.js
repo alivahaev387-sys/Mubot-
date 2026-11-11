@@ -404,11 +404,15 @@ vk.updates.on('message_event', async (context) => {
                 const loserName = await getFullName(loserId);
                 const msgText = `⚔️ Дуэль завершена!\n\n🏆 Победитель: ${winnerName}\n❌ Проигравший: ${loserName}\n\n💰 Выигрыш: ${prize}$`;
                 
-                await context.editMessage({
+                await context.answer({ type: 'show_snackbar', text: '⚔️ Дуэль завершена!' });
+                
+                await vk.api.messages.edit({
+                    peer_id: context.peerId,
+                    conversation_message_id: context.conversationMessageId,
                     message: msgText,
                     keyboard: ""
                 });
-                return await context.answer({ type: 'show_snackbar', text: '⚔️ Дуэль завершена!' });
+                return;
             }
         }
 
@@ -416,12 +420,10 @@ vk.updates.on('message_event', async (context) => {
             const gameId = String(payload.gameId);
             const count = Number(payload.count);
             
-            const row = await dbGet("SELECT bet, mines FROM games WHERE game_id = ? AND user_id = ?", [gameId, String(userId)]);
+            const row = await dbGet("SELECT bet FROM games WHERE game_id = ? AND user_id = ?", [gameId, String(userId)]);
             if (row) {
-                if (row.mines && row.mines !== '[]') {
-                    return await context.answer({ type: 'show_snackbar', text: '❌ Игра уже началась!' });
-                }
-
+                // ИСПРАВЛЕНИЕ: Убрали проверку "Игра уже началась" и снекбар.
+                // Теперь просто генерируем поле и обновляем сообщение.
                 const minesArr = [];
                 while(minesArr.length < count) {
                     const r = Math.floor(Math.random() * 9) + 1;
@@ -432,17 +434,21 @@ vk.updates.on('message_event', async (context) => {
                 
                 const msgText = `💣 Мины\nСтавка: ${row.bet}$ | Мин: ${count} из 9\n\nВыбери клетку, чтобы открыть алмаз 💎`;
                 
-                // Сначала закрываем спиннер (без снекбара)
-                await context.answer(); 
+                // Закрываем загрузку кнопки (без всплывающего текста)
+                await context.answer();
                 
-                // Мгновенно редактируем сообщение
-                await context.editMessage({
-                    message: msgText,
-                    keyboard: getMinesFieldKb(gameId, [], minesArr)
-                });
+                // Обновляем сообщение на поле
+                try {
+                    await vk.api.messages.edit({
+                        peer_id: context.peerId,
+                        conversation_message_id: context.conversationMessageId,
+                        message: msgText,
+                        keyboard: getMinesFieldKb(gameId, [], minesArr)
+                    });
+                } catch (e) {
+                    console.error("Ошибка редактирования сообщения (mines_set):", e);
+                }
                 return;
-            } else {
-                return await context.answer({ type: 'show_snackbar', text: '❌ Игра не найдена.' });
             }
         }
 
@@ -453,10 +459,6 @@ vk.updates.on('message_event', async (context) => {
             const row = await dbGet("SELECT bet, mines, opened, multiplier FROM games WHERE game_id = ? AND user_id = ?", [gameId, String(userId)]);
             
             if (row) {
-                if (!row.mines || row.mines === '[]') {
-                    return await context.answer({ type: 'show_snackbar', text: '❌ Сначала выберите количество мин!' });
-                }
-
                 const bet = row.bet;
                 const mines = JSON.parse(row.mines);
                 const opened = JSON.parse(row.opened);
@@ -473,7 +475,9 @@ vk.updates.on('message_event', async (context) => {
                     
                     await context.answer({ type: 'show_snackbar', text: '💥 БУМ! Вы проиграли.' });
                     
-                    await context.editMessage({
+                    await vk.api.messages.edit({
+                        peer_id: context.peerId,
+                        conversation_message_id: context.conversationMessageId,
                         message: msgText,
                         keyboard: getMinesFieldKb(gameId, Array.from({length: 9}, (_, i) => i + 1), mines, true)
                     });
@@ -493,7 +497,9 @@ vk.updates.on('message_event', async (context) => {
                 
                 await context.answer({ type: 'show_snackbar', text: `💎 Алмаз! x${newMult}` });
                 
-                await context.editMessage({
+                await vk.api.messages.edit({
+                    peer_id: context.peerId,
+                    conversation_message_id: context.conversationMessageId,
                     message: msgText,
                     keyboard: getMinesFieldKb(gameId, opened, mines)
                 });
@@ -518,7 +524,9 @@ vk.updates.on('message_event', async (context) => {
                 
                 const msgText = `💰 Вы забрали выигрыш: ${winAmount}$!\nБаланс: ${formatMoney(await getBalance(userId))}$`;
                 
-                await context.editMessage({
+                await vk.api.messages.edit({
+                    peer_id: context.peerId,
+                    conversation_message_id: context.conversationMessageId,
                     message: msgText,
                     keyboard: ""
                 });
