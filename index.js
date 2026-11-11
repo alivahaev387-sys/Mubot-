@@ -8,7 +8,7 @@ console.log("=========================================");
 console.log("ВЕРСИЯ NODE.JS:", process.version);
 console.log("=========================================");
 
-// ===== НАСТРОЙКИ (ТВОЙ НОВЫЙ ТОКЕН) =====
+// ===== НАСТРОЙКИ =====
 const TOKEN = "vk1.a.BvMZnZvhxLsOu5bIQ1IUIIoYMEW3T88NqEAcRZ17Yj-T46O-viFXkUPWky-4XBwNZAKsWhcwqAt3TDMqQmcKva0ckucYDEUvFKa_p_LJ9ig-zNIPv7cHSZV9KP4S8XLgO0m32YWDLuqfz-rqgrrhoFKZ0mexTvf71NQ5G1JVI0H7QtuL4HGdtQkAvT7Up8xnC-vaO3QTue9x8V5a3u1-DuwMwEXIvfB4OgnVo0_FXGI";
 const ADMIN_ID = 200005093141;
 const BONUS_CD = 600; // 10 минут
@@ -74,15 +74,13 @@ const getDuelKb = (duelId) => Keyboard.builder().inline().callbackButton({
 
 // ===== ОБРАБОТКА СООБЩЕНИЙ =====
 vk.updates.on('message_new', async (message) => {
-    // Если сообщение от самого бота - пропускаем
     if (message.isOutbox) return;
 
     try {
         const text = message.text ? message.text.trim().toLowerCase() : '';
         if (!text) return;
 
-        // ЛОГ: сообщение дошло до бота
-        console.log(`\n[ПОЛУЧЕНО] Чат: ${message.peerId} | От: ${message.senderId} | Текст: ${text}`);
+        console.log(`\n[ПОЛУЧЕНО] Чат: ${message.peerId} | Текст: ${text}`);
 
         const cleanText = text.replace(/\//g, '');
         const parts = cleanText.split(/\s+/);
@@ -94,11 +92,18 @@ vk.updates.on('message_new', async (message) => {
 
         // --- КОМАНДЫ ---
 
+        // 1. КНОПКА "НАЧАТЬ" И ПРИВЕТСТВИЕ
+        if (['начать', 'start'].includes(cleanText)) {
+            return await message.reply("👋 Привет! Я игровой бот. Выбирай действие на клавиатуре или напиши /help для списка команд.", { keyboard: isLs ? mainKb : undefined });
+        }
+
+        // 2. ПОМОЩЬ
         if (['help', 'помощь', 'команды'].includes(cleanText)) {
             const helpText = "📖 Команды:\n💼 Работа\n🎰 /рулетка [цвет/чет] [ставка]\n⚔️ /duel [сумма]\n🎁 /бонус\n🎁 /promo [код]\n📜 /промолист\n👤 /профиль\n🏆 /топ";
             return await message.reply(helpText, { keyboard: isLs ? mainKb : undefined });
         }
 
+        // 3. РАБОТА
         if (text === '💼 работа' || text === 'работа') {
             const earned = Math.floor(Math.random() * 400) + 100;
             await updateBalance(userId, earned);
@@ -106,10 +111,12 @@ vk.updates.on('message_new', async (message) => {
             return await message.reply(`✅ Ты заработал ${earned}$!\n💰 Баланс: ${formatMoney(newBal)}$`, { keyboard: isLs ? mainKb : undefined });
         }
 
+        // 4. ПРОФИЛЬ
         if (['профиль', 'баланс'].includes(cleanText)) {
             return await message.reply(`👤 Профиль:\n💰 Баланс: ${formatMoney(balance)}$\n🆔 ID: ${userId}`, { keyboard: isLs ? mainKb : undefined });
         }
 
+        // 5. ТОП
         if (cleanText === 'топ') {
             const rows = await dbAll("SELECT user_id, balance FROM users WHERE balance > 2 ORDER BY balance DESC LIMIT 10");
             let topText = "🏆 Топ 10:\n\n";
@@ -123,6 +130,7 @@ vk.updates.on('message_new', async (message) => {
             return await message.reply(topText, { keyboard: isLs ? mainKb : undefined });
         }
 
+        // 6. РУЛЕТКА
         if (cleanText.startsWith('рулетка') || cleanText.startsWith('рул')) {
             if (parts.length >= 3) {
                 const choice = parts[1];
@@ -156,6 +164,7 @@ vk.updates.on('message_new', async (message) => {
             }
         }
 
+        // 7. ДУЭЛИ
         if (cleanText.startsWith('duel')) {
             if (parts.length === 2 && !isNaN(parts[1])) {
                 const bet = parseInt(parts[1]);
@@ -171,6 +180,7 @@ vk.updates.on('message_new', async (message) => {
             }
         }
 
+        // 8. БОНУС
         if (cleanText === 'бонус') {
             const currentTime = Math.floor(Date.now() / 1000);
             const row = await dbGet("SELECT last_used FROM bonus_cd WHERE user_id = ?", [String(userId)]);
@@ -188,6 +198,7 @@ vk.updates.on('message_new', async (message) => {
             return await message.reply(`🎁 Бонус получен! ✨\n+${formatMoney(bonusAmount)}$\n💰 Баланс: ${formatMoney(await getBalance(userId))}$`, { keyboard: isLs ? mainKb : undefined });
         }
 
+        // ===== АДМИНСКИЕ КОМАНДЫ =====
         if (userId === ADMIN_ID) {
             if (cleanText.startsWith('деньги')) {
                 if (parts.length === 2 && !isNaN(parts[1]) && message.hasReplyMessage) {
@@ -210,6 +221,7 @@ vk.updates.on('message_new', async (message) => {
             }
         }
 
+        // 9. ПРОМОКОДЫ
         if (cleanText === 'промолист') {
             const rows = await dbAll("SELECT code, amount, limit_count, used_by FROM promos");
             if (rows.length === 0) return await message.reply("❌ Активных промокодов нет.");
@@ -250,6 +262,9 @@ vk.updates.on('message_new', async (message) => {
                 return await message.reply("❌ Формат: /promo [код]");
             }
         }
+
+        // Если команда не распознана (защита от игнора)
+        return await message.reply("❓ Я не знаю такой команды. Напиши /help, чтобы увидеть список доступных команд.");
 
     } catch (error) {
         console.error("КРИТИЧЕСКАЯ ОШИБКА ПРИ ОБРАБОТКЕ:", error);
