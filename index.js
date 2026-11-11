@@ -3,17 +3,22 @@ const sqlite3 = require('sqlite3').verbose();
 const fs = require('fs');
 const path = require('path');
 
-// ===== ПРОВЕРКА ВЕРСИИ =====
 console.log("=========================================");
 console.log("ВЕРСИЯ NODE.JS:", process.version);
 console.log("=========================================");
 
 // ===== НАСТРОЙКИ =====
 const TOKEN = "vk1.a.BvMZnZvhxLsOu5bIQ1IUIIoYMEW3T88NqEAcRZ17Yj-T46O-viFXkUPWky-4XBwNZAKsWhcwqAt3TDMqQmcKva0ckucYDEUvFKa_p_LJ9ig-zNIPv7cHSZV9KP4S8XLgO0m32YWDLuqfz-rqgrrhoFKZ0mexTvf71NQ5G1JVI0H7QtuL4HGdtQkAvT7Up8xnC-vaO3QTue9x8V5a3u1-DuwMwEXIvfB4OgnVo0_FXGI";
+const GROUP_ID = 243089386; // Твой ID группы
 const ADMIN_ID = 200005093141;
 const BONUS_CD = 600; // 10 минут
 
-const vk = new VK({ token: TOKEN, apiVersion: '5.131' });
+// ВАЖНО: pollingGroupId заставляет message.reply работать в беседах
+const vk = new VK({ 
+    token: TOKEN, 
+    apiVersion: '5.131',
+    pollingGroupId: GROUP_ID 
+});
 
 const DATA_DIR = './data';
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR);
@@ -92,32 +97,27 @@ vk.updates.on('message_new', async (message) => {
 
         // --- КОМАНДЫ ---
 
-        // 1. КНОПКА "НАЧАТЬ" И ПРИВЕТСТВИЕ
-        if (['начать', 'start'].includes(cleanText)) {
+        if (text.includes('начать') || text.includes('start')) {
             return await message.reply("👋 Привет! Я игровой бот. Выбирай действие на клавиатуре или напиши /help для списка команд.", { keyboard: isLs ? mainKb : undefined });
         }
 
-        // 2. ПОМОЩЬ
-        if (['help', 'помощь', 'команды'].includes(cleanText)) {
+        if (text.includes('help') || text.includes('помощь') || text.includes('команды')) {
             const helpText = "📖 Команды:\n💼 Работа\n🎰 /рулетка [цвет/чет] [ставка]\n⚔️ /duel [сумма]\n🎁 /бонус\n🎁 /promo [код]\n📜 /промолист\n👤 /профиль\n🏆 /топ";
             return await message.reply(helpText, { keyboard: isLs ? mainKb : undefined });
         }
 
-        // 3. РАБОТА
-        if (text === '💼 работа' || text === 'работа') {
+        if (text.includes('работа')) {
             const earned = Math.floor(Math.random() * 400) + 100;
             await updateBalance(userId, earned);
             const newBal = await getBalance(userId);
             return await message.reply(`✅ Ты заработал ${earned}$!\n💰 Баланс: ${formatMoney(newBal)}$`, { keyboard: isLs ? mainKb : undefined });
         }
 
-        // 4. ПРОФИЛЬ
-        if (['профиль', 'баланс'].includes(cleanText)) {
+        if (text.includes('профиль') || text.includes('баланс')) {
             return await message.reply(`👤 Профиль:\n💰 Баланс: ${formatMoney(balance)}$\n🆔 ID: ${userId}`, { keyboard: isLs ? mainKb : undefined });
         }
 
-        // 5. ТОП
-        if (cleanText === 'топ') {
+        if (text.includes('топ')) {
             const rows = await dbAll("SELECT user_id, balance FROM users WHERE balance > 2 ORDER BY balance DESC LIMIT 10");
             let topText = "🏆 Топ 10:\n\n";
             if (rows.length === 0) topText += "Пока пусто.";
@@ -130,8 +130,7 @@ vk.updates.on('message_new', async (message) => {
             return await message.reply(topText, { keyboard: isLs ? mainKb : undefined });
         }
 
-        // 6. РУЛЕТКА
-        if (cleanText.startsWith('рулетка') || cleanText.startsWith('рул')) {
+        if (text.includes('рулетка') || text.includes('рул')) {
             if (parts.length >= 3) {
                 const choice = parts[1];
                 const betStr = parts[parts.length - 1];
@@ -164,8 +163,7 @@ vk.updates.on('message_new', async (message) => {
             }
         }
 
-        // 7. ДУЭЛИ
-        if (cleanText.startsWith('duel')) {
+        if (text.includes('duel')) {
             if (parts.length === 2 && !isNaN(parts[1])) {
                 const bet = parseInt(parts[1]);
                 if (bet < 50 || bet > 2000) return await message.reply("❌ Ставка от 50 до 2000.");
@@ -180,8 +178,7 @@ vk.updates.on('message_new', async (message) => {
             }
         }
 
-        // 8. БОНУС
-        if (cleanText === 'бонус') {
+        if (text.includes('бонус')) {
             const currentTime = Math.floor(Date.now() / 1000);
             const row = await dbGet("SELECT last_used FROM bonus_cd WHERE user_id = ?", [String(userId)]);
             const lastUse = row ? row.last_used : 0;
@@ -198,9 +195,8 @@ vk.updates.on('message_new', async (message) => {
             return await message.reply(`🎁 Бонус получен! ✨\n+${formatMoney(bonusAmount)}$\n💰 Баланс: ${formatMoney(await getBalance(userId))}$`, { keyboard: isLs ? mainKb : undefined });
         }
 
-        // ===== АДМИНСКИЕ КОМАНДЫ =====
         if (userId === ADMIN_ID) {
-            if (cleanText.startsWith('деньги')) {
+            if (text.includes('деньги')) {
                 if (parts.length === 2 && !isNaN(parts[1]) && message.hasReplyMessage) {
                     const amount = parseInt(parts[1]);
                     const targetId = message.replyMessage.senderId;
@@ -211,7 +207,7 @@ vk.updates.on('message_new', async (message) => {
                 }
             }
 
-            if (cleanText.startsWith('создать')) {
+            if (text.includes('создать')) {
                 if (parts.length === 4 && !isNaN(parts[2]) && !isNaN(parts[3])) {
                     await dbRun("REPLACE INTO promos (code, amount, limit_count, used_by) VALUES (?, ?, ?, '')", [parts[1], parseInt(parts[2]), parseInt(parts[3])]);
                     return await message.reply(`✅ Промокод \`${parts[1]}\` создан!`);
@@ -221,8 +217,7 @@ vk.updates.on('message_new', async (message) => {
             }
         }
 
-        // 9. ПРОМОКОДЫ
-        if (cleanText === 'промолист') {
+        if (text.includes('промолист')) {
             const rows = await dbAll("SELECT code, amount, limit_count, used_by FROM promos");
             if (rows.length === 0) return await message.reply("❌ Активных промокодов нет.");
             
@@ -234,7 +229,7 @@ vk.updates.on('message_new', async (message) => {
             return await message.reply(promoList);
         }
 
-        if (cleanText.startsWith('promo')) {
+        if (text.includes('promo')) {
             if (parts.length === 2) {
                 const row = await dbGet("SELECT amount, limit_count, used_by FROM promos WHERE code = ?", [parts[1]]);
                 
@@ -263,13 +258,12 @@ vk.updates.on('message_new', async (message) => {
             }
         }
 
-        // Если команда не распознана (защита от игнора)
-        return await message.reply("❓ Я не знаю такой команды. Напиши /help, чтобы увидеть список доступных команд.");
+        return await message.reply("❓ Я не знаю такой команды. Напиши /help, чтобы увидеть список доступных команд.", { keyboard: isLs ? mainKb : undefined });
 
     } catch (error) {
-        console.error("КРИТИЧЕСКАЯ ОШИБКА ПРИ ОБРАБОТКЕ:", error);
+        console.error("ОШИБКА ПРИ ОБРАБОТКЕ:", error);
         try {
-            await message.reply(`⚠️ Ошибка на стороне бота:\n${error.message}`);
+            await message.reply(`⚠️ Ошибка на стороне бота: ${error.message}`);
         } catch (e) {}
     }
 });
