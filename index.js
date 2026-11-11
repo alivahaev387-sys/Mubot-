@@ -354,5 +354,5 @@ vk.updates.on('message_event', async (context) => {
     }
 });
 
-// Запуск LongPoll
-vk.updates.start().catch(console.error);
+// ВОТ ЗДЕСЬ ИСПРАВЛЕНИЕ (startPolling вместо start)
+vk.updates.startPolling().catch(console.error);
