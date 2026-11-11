@@ -488,12 +488,10 @@ while True:
                         send_msg(peer_id, promo_list, reply_to=reply_to_id)
 
                 # 12. ВЫДАЧА ДЕНЕГ (ТОЛЬКО В ЛС И ТОЛЬКО ДЛЯ ВЛАДЕЛЬЦА)
-                elif clean_text.startswith("выдать") and user_id == ADMIN_ID and is_ls:
+                elif (clean_text.startswith("выдать") or clean_text.startswith("выдал")) and user_id == ADMIN_ID and is_ls:
                     try:
                         if len(parts) == 3 and parts[1] == "все":
                             amount = int(parts[2])
-                            
-                            # Получаем всех из базы
                             conn = sqlite3.connect(DB_FILE)
                             c = conn.cursor()
                             c.execute("SELECT user_id FROM users")
