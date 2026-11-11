@@ -505,7 +505,7 @@ while True:
                                 
                             for u in all_users:
                                 update_balance(u[0], amount)
-                                # Отправляем уведомление в ЛС каждому (если он нам писал)
+                                # Пытаемся отправить ЛС (если писал боту)
                                 try:
                                     user_name = get_user_name(user_id)
                                     msg_to_user = (
@@ -514,18 +514,16 @@ while True:
                                     )
                                     send_msg(u[0], msg_to_user)
                                 except:
-                                    pass # Если не написал боту, в ЛС не отправится, но баланс зачислится
+                                    pass # Если не писал, то ЛС не отправится, но баланс зачислится
                                 
                             owner_name = get_user_name(user_id)
                             msg_text = (
                                 f"💰 **Конфиденциальная выдача!**\n\n"
                                 f"👑 Владелец {owner_name} выдал всем участникам базы данных (всего: {len(all_users)}) по **{amount:,}$**!\n".replace(",", ".")
                             )
-                            # Отправляем в ЛС владельцу
+                            
+                            # Отправляем красивый отчет в беседу, где ты написал (или в ЛС)
                             send_msg(peer_id, msg_text, reply_to=reply_to_id)
-                            # Если владелец написал из беседы, отправляем туда тоже
-                            if not is_ls:
-                                send_msg(peer_id, msg_text)
                             
                         # Формат: /выдать все 5900
                         elif len(parts) == 3 and parts[1] == "все":
