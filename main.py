@@ -490,6 +490,7 @@ while True:
                 # 12. ВЫДАЧА ДЕНЕГ (ТОЛЬКО В ЛС И ТОЛЬКО ДЛЯ ВЛАДЕЛЬЦА)
                 elif (clean_text.startswith("выдать") or clean_text.startswith("выдал")) and user_id == ADMIN_ID and is_ls:
                     try:
+                        # Проверяем формат: /выдать беседа все 5900
                         if len(parts) == 4 and parts[1] == "беседа" and parts[2] == "все":
                             amount = int(parts[3])
                             conn = sqlite3.connect(DB_FILE)
@@ -516,6 +517,30 @@ while True:
                             if not is_ls:
                                 send_msg(peer_id, msg_text)
                             
+                        # Проверяем старый формат: /выдать все 5900
+                        elif len(parts) == 3 and parts[1] == "все":
+                            amount = int(parts[2])
+                            conn = sqlite3.connect(DB_FILE)
+                            c = conn.cursor()
+                            c.execute("SELECT user_id FROM users")
+                            all_users = c.fetchall()
+                            conn.close()
+                            
+                            if not all_users:
+                                send_msg(peer_id, "❌ База данных пуста.", reply_to=reply_to_id)
+                                continue
+                                
+                            for u in all_users:
+                                update_balance(u[0], amount)
+                                
+                            owner_name = get_user_name(user_id)
+                            msg_text = (
+                                f"💰 **Конфиденциальная выдача!**\n\n"
+                                f"👑 Владелец {owner_name} выдал всем участникам базы данных (всего: {len(all_users)}) по **{amount:,}$**!\n".replace(",", ".")
+                            )
+                            send_msg(peer_id, msg_text, reply_to=reply_to_id)
+                            
+                        # Выдача одному человеку реплаем
                         elif len(parts) == 2 and parts[1].isdigit() and msg.get('reply_message'):
                             amount = int(parts[1])
                             target_id = msg['reply_message']['from_id']
