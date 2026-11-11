@@ -2,6 +2,7 @@ import vk_api
 from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
 import json, random, time, asyncio, os
 import sqlite3
+import requests
 
 # ===== НАСТРОЙКИ =====
 TOKEN = "vk1.a.n-y1VnQMFI87cAGH7zXHwYy6LncLM_UuAaCihe6dlWxUBLGwS8no-KjRmFrA9zmwy-STfP7f2VZOHArq1-WVKYVRUA3H1F3-pO5gtXRxEziw3u3st-dTYHNiK_an2ZcbUIpXYNy98HHTGQv12wFtMLsSASQ0kO0ke0B0DRsXc7hn-LQrYcpbu54a_kQmP7dxBO5a8gTmuS9Dn9LH7oMLfE6G6_GPJZxJAgkwzptCnWw"
@@ -238,9 +239,10 @@ async def main():
     init_db()
     print("БОТ ЗАПУЩЕН! БАЗА В /app/data СОХРАНЯЕТСЯ.")
 
-    while True: # Защита от падений
+    while True: # Бесконечный цикл для переподключения
         try:
             for event in longpoll.listen():
+                # --- ВЕСЬ ТВОЙ КОД ОБРАБОТКИ СОБЫТИЙ ---
                 if event.type == VkBotEventType.MESSAGE_EVENT:
                     payload = event.object.payload
                     peer_id, user_id, event_id, cm_id = event.object.peer_id, event.object.user_id, event.object.event_id, event.object.conversation_message_id
@@ -256,11 +258,9 @@ async def main():
                             if str(user_id) == challenger:
                                 vk.messages.sendMessageEventAnswer(event_id=event_id, user_id=user_id, peer_id=peer_id, event_data=json.dumps({"type": "show_snackbar", "text": "❌ Нельзя драться с собой!"}))
                                 conn.close(); continue
-                            
                             if get_balance(user_id) < bet:
                                 vk.messages.sendMessageEventAnswer(event_id=event_id, user_id=user_id, peer_id=peer_id, event_data=json.dumps({"type": "show_snackbar", "text": "❌ У тебя не хватает денег на ставку!"}))
                                 conn.close(); continue
-                                
                             winner_id = random.choice([int(challenger), user_id])
                             loser_id = int(challenger) if winner_id == user_id else user_id
                             prize = int(bet * 1.8)
@@ -319,7 +319,6 @@ async def main():
                                 edit_msg(peer_id, cm_id, msg_text, get_mines_field_kb(game))
                                 vk.messages.sendMessageEventAnswer(event_id=event_id, user_id=user_id, peer_id=peer_id, event_data=json.dumps({"type": "show_snackbar", "text": "💥 БУМ! Вы проиграли."}))
                                 conn.close(); continue
-                            
                             opened_count, mines_count = len(opened), len(mines)
                             new_mult = 1.0
                             for i in range(opened_count):
@@ -673,6 +672,9 @@ async def main():
                             print(f"Ошибка промо: {e}")
                             send_msg(peer_id, "❌ Формат: /promo код", reply_to=reply_to_id)
 
+        except requests.exceptions.ReadTimeout:
+            print("⚠️ ВК не ответил вовремя. Ждем 2 секунды...")
+            time.sleep(2)
         except Exception as e:
-            print(f"⚠️ Ошибка в цикле: {e}")
-            time.sleep(1) # Ждем 1 секунду и продолжаем
+            print(f"⚠️ Другая ошибка: {e}")
+            time.sleep(1)
