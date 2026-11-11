@@ -9,7 +9,6 @@ console.log("ВЕРСИЯ NODE.JS:", process.version);
 console.log("=========================================");
 
 // ===== НАСТРОЙКИ =====
-// Твой токен
 const TOKEN = "vk1.a.c1YiC8Y5P5tz8h0AmQdKDJYepilUUC2ew3Krh6kx-nr_w65VYJruj2pfXkcXSWutUwvCqTwCb8MLEMTQnOSNZrCqx1Jh-TaPwF_gEsZOAiq3-g6cJk8RbaOmOqJr3de3-iURXc1pAW2WzI0CvYvu-OPQmAdky5hCe2LrcgqrmHgtAht5gigIedBl29vM_CzjydlVS6y93BGtJnIPzpXb48ciC_kW7yERkY1RL2P_LGQ";
 const ADMIN_ID = 200005093141;
 const BONUS_CD = 600; // 10 минут
@@ -40,7 +39,7 @@ async function initDB() {
     await dbRun("CREATE TABLE IF NOT EXISTS active_duels (msg_id TEXT PRIMARY KEY, challenger TEXT, bet INTEGER, peer_id TEXT)");
     await dbRun("CREATE TABLE IF NOT EXISTS bonus_cd (user_id TEXT PRIMARY KEY, last_used INTEGER)");
     await dbRun("CREATE TABLE IF NOT EXISTS promos (code TEXT PRIMARY KEY, amount INTEGER, limit_count INTEGER, used_by TEXT DEFAULT '')");
-    console.log("--- БОТ ЗАПУЩЕН УСПЕШНО ---");
+    console.log("--- БАЗА ДАННЫХ ГОТОВА ---");
 }
 initDB();
 
@@ -72,6 +71,17 @@ function formatMoney(num) {
     return num.toLocaleString('ru-RU');
 }
 
+// Безопасная отправка сообщения (с логами ошибок)
+async function safeReply(message, text, params = {}) {
+    try {
+        console.log(`[ОТПРАВКА] peer_id: ${message.peerId}, Текст: ${text.substring(0, 20)}...`);
+        await message.reply(text, params);
+        console.log(`[УСПЕХ] Сообщение доставлено`);
+    } catch (e) {
+        console.error(`[ОШИБКА ОТПРАВКИ]`, e.message);
+    }
+}
+
 // ===== КЛАВИАТУРЫ =====
 const mainKb = Keyboard.builder()
     .textButton({ label: '💼 Работа', payload: 'work', color: Keyboard.POSITIVE_COLOR })
@@ -91,6 +101,10 @@ const getDuelKb = (duelId) => Keyboard.builder()
 // ===== ОБРАБОТКА СООБЩЕНИЙ =====
 vk.updates.on('message_new', async (message) => {
     if (message.isOutbox) return;
+
+    console.log(`\n=== НОВОЕ СООБЩЕНИЕ ===`);
+    console.log(`От: ${message.senderId} | peer_id: ${message.peerId} | Беседа: ${message.isChat}`);
+    console.log(`Текст: "${message.text}"`);
 
     const text = message.text ? message.text.trim().toLowerCase() : '';
     const cleanText = text.replace(/\//g, '');
@@ -115,20 +129,20 @@ vk.updates.on('message_new', async (message) => {
             "📜 /промолист — Список активных промокодов\n" +
             "👤 /профиль — Твой баланс\n" +
             "🏆 /топ — Топ богачей";
-        return message.reply(helpText, { keyboard: isLs ? mainKb : undefined });
+        return safeReply(message, helpText, { keyboard: isLs ? mainKb : undefined });
     }
 
     // 2. РАБОТА
-    if (text === '💼 работа') {
-        const earned = Math.floor(Math.random() * 400) + 100; // 100-500
+    if (text === '💼 работа' || text === 'работа') {
+        const earned = Math.floor(Math.random() * 400) + 100;
         await updateBalance(userId, earned);
         const newBal = await getBalance(userId);
-        return message.reply(`✅ Ты заработал ${earned}$!\n💰 Баланс: ${formatMoney(newBal)}$`, { keyboard: mainKb });
+        return safeReply(message, `✅ Ты заработал ${earned}$!\n💰 Баланс: ${formatMoney(newBal)}$`, { keyboard: isLs ? mainKb : undefined });
     }
 
     // 3. ПРОФИЛЬ
     if (['профиль', 'баланс'].includes(cleanText)) {
-        return message.reply(`👤 Твой профиль:\n💰 Баланс: ${formatMoney(balance)}$\n🆔 ID: ${userId}`, { keyboard: isLs ? mainKb : undefined });
+        return safeReply(message, `👤 Твой профиль:\n💰 Баланс: ${formatMoney(balance)}$\n🆔 ID: ${userId}`, { keyboard: isLs ? mainKb : undefined });
     }
 
     // 4. ТОП
@@ -143,7 +157,7 @@ vk.updates.on('message_new', async (message) => {
                 topText += `${i + 1}. ${uName} — ${formatMoney(rows[i].balance)}$\n`;
             }
         }
-        return message.reply(topText, { keyboard: isLs ? mainKb : undefined });
+        return safeReply(message, topText, { keyboard: isLs ? mainKb : undefined });
     }
 
     // 5. РУЛЕТКА
@@ -155,11 +169,11 @@ vk.updates.on('message_new', async (message) => {
 
             if (['вб', 'всё', 'все'].includes(betStr)) bet = balance;
             else if (!isNaN(betStr)) bet = parseInt(betStr);
-            else return message.reply("❌ Неверная ставка.");
+            else return safeReply(message, "❌ Неверная ставка.");
 
-            if (bet < 10 || bet > balance) return message.reply(`❌ Мин. ставка 10, у тебя ${formatMoney(balance)}$`);
+            if (bet < 10 || bet > balance) return safeReply(message, `❌ Мин. ставка 10, у тебя ${formatMoney(balance)}$`);
 
-            const res = Math.floor(Math.random() * 37); // 0-36
+            const res = Math.floor(Math.random() * 37);
             const redNumbers = [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36];
             
             let colorName = "", colorEmoji = "", evenName = "";
@@ -186,9 +200,9 @@ vk.updates.on('message_new', async (message) => {
                 await updateBalance(userId, -bet);
                 msgText = `🎰 Выпало: ${res} ${colorEmoji} (${colorName}, ${evenName})\n\n😔 Ты проиграл: -${bet}$\n💰 Баланс: ${formatMoney(await getBalance(userId))}$`;
             }
-            return message.reply(msgText, { keyboard: isLs ? mainKb : undefined });
+            return safeReply(message, msgText, { keyboard: isLs ? mainKb : undefined });
         } else {
-            return message.reply("❌ Формат: /рулетка красное 500");
+            return safeReply(message, "❌ Формат: /рулетка красное 500");
         }
     }
 
@@ -196,8 +210,8 @@ vk.updates.on('message_new', async (message) => {
     if (cleanText.startsWith('duel')) {
         if (parts.length === 2 && !isNaN(parts[1])) {
             const bet = parseInt(parts[1]);
-            if (bet < 50 || bet > 2000) return message.reply("❌ Ставка от 50 до 2000.");
-            if (balance < bet) return message.reply("❌ Не хватает монет.");
+            if (bet < 50 || bet > 2000) return safeReply(message, "❌ Ставка от 50 до 2000.");
+            if (balance < bet) return safeReply(message, "❌ Не хватает монет.");
 
             const duelId = String(Math.floor(Math.random() * 90000) + 10000);
             await dbRun("REPLACE INTO active_duels (msg_id, challenger, bet, peer_id) VALUES (?, ?, ?, ?)", [duelId, String(userId), bet, String(peerId)]);
@@ -206,9 +220,9 @@ vk.updates.on('message_new', async (message) => {
                 `⚔️ Дуэль!\n👤 Создатель: ${await getName(userId)}\n` +
                 `💰 Ставка: ${bet}$\n\n🌑 Приз: ${Math.floor(bet * 1.8)}$\n⚡ Нажми кнопку ниже!`;
             
-            return message.reply(duelText, { keyboard: getDuelKb(duelId) });
+            return safeReply(message, duelText, { keyboard: getDuelKb(duelId) });
         } else {
-            return message.reply("❌ Формат: /duel [сумма] (от 50 до 2000)");
+            return safeReply(message, "❌ Формат: /duel [сумма] (от 50 до 2000)");
         }
     }
 
@@ -220,7 +234,7 @@ vk.updates.on('message_new', async (message) => {
 
         if (currentTime - lastUse < BONUS_CD) {
             const remaining = BONUS_CD - (currentTime - lastUse);
-            return message.reply(`⏳ Бонус доступен через ${Math.floor(remaining / 60)} мин. ${remaining % 60} сек.`);
+            return safeReply(message, `⏳ Бонус доступен через ${Math.floor(remaining / 60)} мин. ${remaining % 60} сек.`);
         }
 
         const bonusAmount = [100000, 200000, 500000][Math.floor(Math.random() * 3)];
@@ -228,20 +242,20 @@ vk.updates.on('message_new', async (message) => {
         await dbRun("REPLACE INTO bonus_cd (user_id, last_used) VALUES (?, ?)", [String(userId), currentTime]);
         
         const newBal = await getBalance(userId);
-        return message.reply(`🎁 Бонус получен! ✨\n+${formatMoney(bonusAmount)}$\n💰 Баланс: ${formatMoney(newBal)}$`, { keyboard: isLs ? mainKb : undefined });
+        return safeReply(message, `🎁 Бонус получен! ✨\n+${formatMoney(bonusAmount)}$\n💰 Баланс: ${formatMoney(newBal)}$`, { keyboard: isLs ? mainKb : undefined });
     }
 
     // ===== АДМИНСКИЕ КОМАНДЫ =====
     if (userId === ADMIN_ID) {
-        // ВЫДАЧА ДЕНЕГ (ответом на сообщение)
+        // ВЫДАЧА ДЕНЕГ
         if (cleanText.startsWith('деньги')) {
             if (parts.length === 2 && !isNaN(parts[1]) && message.hasReplyMessage) {
                 const amount = parseInt(parts[1]);
                 const targetId = message.replyMessage.senderId;
                 await updateBalance(targetId, amount);
-                return message.reply(`💰 Владелец выдал ${formatMoney(amount)}$ игроку ${await getName(targetId)}!`);
+                return safeReply(message, `💰 Владелец выдал ${formatMoney(amount)}$ игроку ${await getName(targetId)}!`);
             } else {
-                return message.reply("❌ Формат: /деньги [сумма] (ответом на сообщение)");
+                return safeReply(message, "❌ Формат: /деньги [сумма] (ответом на сообщение)");
             }
         }
 
@@ -252,9 +266,9 @@ vk.updates.on('message_new', async (message) => {
                 const amount = parseInt(parts[2]);
                 const limit = parseInt(parts[3]);
                 await dbRun("REPLACE INTO promos (code, amount, limit_count, used_by) VALUES (?, ?, ?, '')", [code, amount, limit]);
-                return message.reply(`✅ Промокод \`${code}\` на ${amount}$ (Лимит: ${limit}) создан!`);
+                return safeReply(message, `✅ Промокод \`${code}\` на ${amount}$ (Лимит: ${limit}) создан!`);
             } else {
-                return message.reply("❌ Формат: /создать [код] [сумма] [лимит]");
+                return safeReply(message, "❌ Формат: /создать [код] [сумма] [лимит]");
             }
         }
     }
@@ -262,14 +276,14 @@ vk.updates.on('message_new', async (message) => {
     // 8. СПИСОК ПРОМОКОДОВ
     if (cleanText === 'промолист') {
         const rows = await dbAll("SELECT code, amount, limit_count, used_by FROM promos");
-        if (rows.length === 0) return message.reply("❌ Активных промокодов нет.");
+        if (rows.length === 0) return safeReply(message, "❌ Активных промокодов нет.");
         
         let promoList = "🎁 Активные промокоды:\n\n";
         for (const r of rows) {
             const usedCount = r.used_by ? r.used_by.split(",").length : 0;
             promoList += `▪️ \`${r.code}\` — ${r.amount}$ (Активировали: ${usedCount}/${r.limit_count})\n`;
         }
-        return message.reply(promoList);
+        return safeReply(message, promoList);
     }
 
     // 9. АКТИВАЦИЯ ПРОМОКОДА
@@ -278,7 +292,7 @@ vk.updates.on('message_new', async (message) => {
             const code = parts[1];
             const row = await dbGet("SELECT amount, limit_count, used_by FROM promos WHERE code = ?", [code]);
             
-            if (!row) return message.reply("❌ Промокод не существует или уже исчерпан.");
+            if (!row) return safeReply(message, "❌ Промокод не существует или уже исчерпан.");
             
             const amount = row.amount;
             const limit = row.limit_count;
@@ -286,23 +300,23 @@ vk.updates.on('message_new', async (message) => {
             
             if (usedBy.length >= limit) {
                 await dbRun("DELETE FROM promos WHERE code = ?", [code]);
-                return message.reply("❌ Промокод больше не действителен.");
+                return safeReply(message, "❌ Промокод больше не действителен.");
             }
             
-            if (usedBy.includes(String(userId))) return message.reply("❌ Ты уже активировал этот промокод!");
+            if (usedBy.includes(String(userId))) return safeReply(message, "❌ Ты уже активировал этот промокод!");
             
             usedBy.push(String(userId));
             await updateBalance(userId, amount);
             
             if (usedBy.length >= limit) {
                 await dbRun("DELETE FROM promos WHERE code = ?", [code]);
-                return message.reply(`✅ Промокод активирован! +${amount}$\n⚠️ Это была последняя активация. Промокод удален.`);
+                return safeReply(message, `✅ Промокод активирован! +${amount}$\n⚠️ Это была последняя активация. Промокод удален.`);
             } else {
                 await dbRun("UPDATE promos SET used_by = ? WHERE code = ?", [usedBy.join(","), code]);
-                return message.reply(`✅ Промокод активирован! +${amount}$\nОсталось активаций: ${limit - usedBy.length}`);
+                return safeReply(message, `✅ Промокод активирован! +${amount}$\nОсталось активаций: ${limit - usedBy.length}`);
             }
         } else {
-            return message.reply("❌ Формат: /promo [код]");
+            return safeReply(message, "❌ Формат: /promo [код]");
         }
     }
 });
@@ -357,8 +371,9 @@ vk.updates.on('message_event', async (context) => {
 // ===== ЗАПУСК =====
 (async () => {
     try {
+        console.log("ЗАПУСК БОТА...");
         await vk.updates.start();
-        console.log("Бот успешно запущен и слушает события.");
+        console.log("--- БОТ УСПЕШНО ЗАПУЩЕН И СЛУШАЕТ ---");
     } catch (error) {
         console.error("КРИТИЧЕСКАЯ ОШИБКА ПРИ ЗАПУСКЕ:", error);
     }
