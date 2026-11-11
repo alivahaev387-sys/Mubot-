@@ -249,8 +249,8 @@ while True:
                 clean_text = text.replace("/", "").strip()
                 parts = clean_text.split()
                 
-                # === ИСПРАВЛЕНИЕ РЕПЛАЯ (conversation_message_id для бесед) ===
-                reply_to_id = msg.get('conversation_message_id') or msg.get('id')
+                # === ИСПРАВЛЕНИЕ: глобальный message_id для reply_to ===
+                reply_to_id = msg.get('id')
 
                 if not text and is_ls:
                     send_msg(peer_id, f"👋 Привет! Твой баланс: {balance}$\nЖми «Работа» или пиши /help", get_main_kb(), reply_to=reply_to_id)
