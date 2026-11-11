@@ -404,16 +404,11 @@ vk.updates.on('message_event', async (context) => {
                 const loserName = await getFullName(loserId);
                 const msgText = `⚔️ Дуэль завершена!\n\n🏆 Победитель: ${winnerName}\n❌ Проигравший: ${loserName}\n\n💰 Выигрыш: ${prize}$`;
                 
-                await context.answer({ type: 'show_snackbar', text: '⚔️ Дуэль завершена!' });
-                
-                // П.1: Передаем пустую строку для удаления клавиатуры
-                await vk.api.messages.edit({
-                    peer_id: context.peerId,
-                    conversation_message_id: context.conversationMessageId,
+                await context.editMessage({
                     message: msgText,
                     keyboard: ""
                 });
-                return;
+                return await context.answer({ type: 'show_snackbar', text: '⚔️ Дуэль завершена!' });
             }
         }
 
@@ -437,11 +432,11 @@ vk.updates.on('message_event', async (context) => {
                 
                 const msgText = `💣 Мины\nСтавка: ${row.bet}$ | Мин: ${count} из 9\n\nВыбери клетку, чтобы открыть алмаз 💎`;
                 
-                await context.answer({ type: 'show_snackbar', text: 'Игра началась!' });
+                // Сначала закрываем спиннер (без снекбара)
+                await context.answer(); 
                 
-                await vk.api.messages.edit({
-                    peer_id: context.peerId,
-                    conversation_message_id: context.conversationMessageId,
+                // Мгновенно редактируем сообщение
+                await context.editMessage({
                     message: msgText,
                     keyboard: getMinesFieldKb(gameId, [], minesArr)
                 });
@@ -478,9 +473,7 @@ vk.updates.on('message_event', async (context) => {
                     
                     await context.answer({ type: 'show_snackbar', text: '💥 БУМ! Вы проиграли.' });
                     
-                    await vk.api.messages.edit({
-                        peer_id: context.peerId,
-                        conversation_message_id: context.conversationMessageId,
+                    await context.editMessage({
                         message: msgText,
                         keyboard: getMinesFieldKb(gameId, Array.from({length: 9}, (_, i) => i + 1), mines, true)
                     });
@@ -500,9 +493,7 @@ vk.updates.on('message_event', async (context) => {
                 
                 await context.answer({ type: 'show_snackbar', text: `💎 Алмаз! x${newMult}` });
                 
-                await vk.api.messages.edit({
-                    peer_id: context.peerId,
-                    conversation_message_id: context.conversationMessageId,
+                await context.editMessage({
                     message: msgText,
                     keyboard: getMinesFieldKb(gameId, opened, mines)
                 });
@@ -525,20 +516,13 @@ vk.updates.on('message_event', async (context) => {
                 await updateBalance(userId, winAmount);
                 await dbRun("DELETE FROM games WHERE game_id = ?", [gameId]);
                 
-                // 1. Сначала показываем уведомление (snackbar)
-                await context.answer({ type: 'show_snackbar', text: `💰 Вы забрали ${winAmount}$!` });
-                
-                // 2. Формируем новый текст
                 const msgText = `💰 Вы забрали выигрыш: ${winAmount}$!\nБаланс: ${formatMoney(await getBalance(userId))}$`;
                 
-                // 3. Редактируем сообщение (пустая строка "" убирает кнопки)
-                await vk.api.messages.edit({
-                    peer_id: context.peerId,
-                    conversation_message_id: context.conversationMessageId,
+                await context.editMessage({
                     message: msgText,
                     keyboard: ""
                 });
-                return;
+                return await context.answer({ type: 'show_snackbar', text: `💰 Вы забрали ${winAmount}$!` });
             } else {
                 return await context.answer({ type: 'show_snackbar', text: '❌ Игра не найдена или уже завершена.' });
             }
