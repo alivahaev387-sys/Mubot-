@@ -79,7 +79,6 @@ const getDuelKb = (duelId) => Keyboard.builder().inline().callbackButton({
     color: Keyboard.POSITIVE_COLOR
 }).toString();
 
-// Клавиатура выбора мин (разбита на ряды)
 const getMinesCountKb = (gameId) => {
     const kb = Keyboard.builder().inline();
     let count = 0;
@@ -91,8 +90,8 @@ const getMinesCountKb = (gameId) => {
     return kb.toString();
 };
 
-// Игровое поле
-const getMinesFieldKb = (gameId, opened, mines) => {
+// ИСПРАВЛЕНИЕ П.1: Добавлен параметр isGameOver (по умолчанию false)
+const getMinesFieldKb = (gameId, opened, mines, isGameOver = false) => {
     const kb = Keyboard.builder().inline();
     for (let i = 1; i <= 9; i++) {
         if (opened.includes(i)) {
@@ -104,13 +103,19 @@ const getMinesFieldKb = (gameId, opened, mines) => {
         } else {
             kb.callbackButton({ 
                 label: String(i), 
-                payload: { cmd: 'mines_click', gameId: String(gameId), cell: String(i) }, 
+                // Если игра окончена, кнопки становятся неактивными заглушками
+                payload: isGameOver ? { cmd: 'none' } : { cmd: 'mines_click', gameId: String(gameId), cell: String(i) }, 
                 color: Keyboard.SECONDARY_COLOR 
             });
         }
         if (i % 3 === 0) kb.row();
     }
-    kb.callbackButton({ label: '💰 Забрать', payload: { cmd: 'mines_cashout', gameId: String(gameId) }, color: Keyboard.POSITIVE_COLOR });
+    
+    // Если игра НЕ окончена, добавляем кнопку "Забрать"
+    if (!isGameOver) {
+        kb.callbackButton({ label: '💰 Забрать', payload: { cmd: 'mines_cashout', gameId: String(gameId) }, color: Keyboard.POSITIVE_COLOR });
+    }
+    
     return kb.toString();
 };
 
@@ -402,19 +407,15 @@ vk.updates.on('message_event', async (context) => {
                 const loserName = await getFullName(loserId);
                 const msgText = `⚔️ Дуэль завершена!\n\n🏆 Победитель: ${winnerName}\n❌ Проигравший: ${loserName}\n\n💰 Выигрыш: ${prize}$`;
                 
-                await vk.api.messages.edit({
-                    peer_id: context.peerId,
-                    conversation_message_id: context.conversationMessageId,
-                    message: msgText,
-                    keyboard: null
-                });
-                return await context.answer({ type: 'show_snackbar', text: '⚔️ Дуэль завершена!' });
+                await context.answer({ type: 'show_snackbar', text: '⚔️ Дуэль завершена!' });
+                await context.editMessage({ message: msgText, keyboard: null });
+                return;
             }
         }
 
         if (payload.cmd === 'mines_set') {
             const gameId = String(payload.gameId);
-            const count = Number(payload.count); // Конвертируем строку в число
+            const count = Number(payload.count);
             
             const row = await dbGet("SELECT bet FROM games WHERE game_id = ? AND user_id = ?", [gameId, String(userId)]);
             if (row) {
@@ -428,20 +429,15 @@ vk.updates.on('message_event', async (context) => {
                 
                 const msgText = `💣 Мины\nСтавка: ${row.bet}$ | Мин: ${count} из 9\n\nВыбери клетку, чтобы открыть алмаз 💎`;
                 
-                // Прямой вызов API для редактирования сообщения
-                await vk.api.messages.edit({
-                    peer_id: context.peerId,
-                    conversation_message_id: context.conversationMessageId,
-                    message: msgText,
-                    keyboard: getMinesFieldKb(gameId, [], minesArr)
-                });
-                return await context.answer({ type: 'show_snackbar', text: 'Игра началась!' });
+                await context.answer({ type: 'show_snackbar', text: 'Игра началась!' });
+                await context.editMessage({ message: msgText, keyboard: getMinesFieldKb(gameId, [], minesArr) });
+                return;
             }
         }
 
         if (payload.cmd === 'mines_click') {
             const gameId = String(payload.gameId);
-            const cell = Number(payload.cell); // Конвертируем строку в число
+            const cell = Number(payload.cell);
             
             const row = await dbGet("SELECT bet, mines, opened, multiplier FROM games WHERE game_id = ? AND user_id = ?", [gameId, String(userId)]);
             
@@ -459,13 +455,11 @@ vk.updates.on('message_event', async (context) => {
                     await dbRun("DELETE FROM games WHERE game_id = ?", [gameId]);
                     
                     const msgText = `💥 Вы попали на мину!\n\nПроигрыш: -${bet}$\nБаланс: ${formatMoney(await getBalance(userId))}$`;
-                    await vk.api.messages.edit({
-                        peer_id: context.peerId,
-                        conversation_message_id: context.conversationMessageId,
-                        message: msgText,
-                        keyboard: getMinesFieldKb(gameId, Array.from({length: 9}, (_, i) => i + 1), mines)
-                    });
-                    return await context.answer({ type: 'show_snackbar', text: '💥 БУМ! Вы проиграли.' });
+                    
+                    await context.answer({ type: 'show_snackbar', text: '💥 БУМ! Вы проиграли.' });
+                    // ИСПРАВЛЕНИЕ П.1: Передаем true, чтобы убрать кнопку "Забрать"
+                    await context.editMessage({ message: msgText, keyboard: getMinesFieldKb(gameId, Array.from({length: 9}, (_, i) => i + 1), mines, true) });
+                    return;
                 }
 
                 let newMult = 1.0;
@@ -479,32 +473,29 @@ vk.updates.on('message_event', async (context) => {
                 const winAmount = Math.floor(bet * newMult);
                 const msgText = `💣 Мины\nСтавка: ${bet}$ | Мин: ${mines.length} из 9\n\nОткрыто алмазов: ${opened.length} | Коэф: x${newMult}\nВыигрыш сейчас: ${winAmount}$`;
                 
-                await vk.api.messages.edit({
-                    peer_id: context.peerId,
-                    conversation_message_id: context.conversationMessageId,
-                    message: msgText,
-                    keyboard: getMinesFieldKb(gameId, opened, mines)
-                });
-                return await context.answer({ type: 'show_snackbar', text: `💎 Алмаз! x${newMult}` });
+                await context.answer({ type: 'show_snackbar', text: `💎 Алмаз! x${newMult}` });
+                await context.editMessage({ message: msgText, keyboard: getMinesFieldKb(gameId, opened, mines) });
+                return;
             }
         }
 
         if (payload.cmd === 'mines_cashout') {
             const gameId = String(payload.gameId);
             const row = await dbGet("SELECT bet, multiplier FROM games WHERE game_id = ? AND user_id = ?", [gameId, String(userId)]);
+            
             if (row) {
                 const winAmount = Math.floor(row.bet * row.multiplier);
                 await updateBalance(userId, winAmount);
                 await dbRun("DELETE FROM games WHERE game_id = ?", [gameId]);
                 
+                // ИСПРАВЛЕНИЕ П.2: Сначала отвечаем на кнопку (убирает загрузку), потом редактируем
+                await context.answer({ type: 'show_snackbar', text: '💰 Деньги у вас!' });
+                
                 const msgText = `💰 Вы забрали выигрыш: ${winAmount}$!\nБаланс: ${formatMoney(await getBalance(userId))}$`;
-                await vk.api.messages.edit({
-                    peer_id: context.peerId,
-                    conversation_message_id: context.conversationMessageId,
-                    message: msgText,
-                    keyboard: null
-                });
-                return await context.answer({ type: 'show_snackbar', text: '💰 Деньги у вас!' });
+                await context.editMessage({ message: msgText, keyboard: null });
+                return;
+            } else {
+                return await context.answer({ type: 'show_snackbar', text: '❌ Игра не найдена или уже завершена.' });
             }
         }
 
