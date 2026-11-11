@@ -490,8 +490,8 @@ while True:
                 # 12. ВЫДАЧА ДЕНЕГ (ТОЛЬКО В ЛС И ТОЛЬКО ДЛЯ ВЛАДЕЛЬЦА)
                 elif (clean_text.startswith("выдать") or clean_text.startswith("выдал")) and user_id == ADMIN_ID and is_ls:
                     try:
-                        if len(parts) == 3 and parts[1] == "все":
-                            amount = int(parts[2])
+                        if len(parts) == 4 and parts[1] == "беседа" and parts[2] == "все":
+                            amount = int(parts[3])
                             conn = sqlite3.connect(DB_FILE)
                             c = conn.cursor()
                             c.execute("SELECT user_id FROM users")
@@ -512,6 +512,10 @@ while True:
                             )
                             send_msg(peer_id, msg_text, reply_to=reply_to_id)
                             
+                            # Если ты в беседе — напиши туда тоже
+                            if not is_ls:
+                                send_msg(peer_id, msg_text)
+                            
                         elif len(parts) == 2 and parts[1].isdigit() and msg.get('reply_message'):
                             amount = int(parts[1])
                             target_id = msg['reply_message']['from_id']
@@ -525,7 +529,7 @@ while True:
                             )
                             send_msg(peer_id, msg_text, reply_to=reply_to_id)
                         else:
-                            send_msg(peer_id, "❌ Формат: /выдать все 5000 или ответом /выдать 5000", reply_to=reply_to_id)
+                            send_msg(peer_id, "❌ Формат: /выдать беседа все 5000 или ответом /выдать 5000", reply_to=reply_to_id)
                     except Exception as e:
                         print(f"Ошибка выдачи: {e}")
                         
