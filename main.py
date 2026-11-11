@@ -249,11 +249,10 @@ while True:
                 clean_text = text.replace("/", "").strip()
                 parts = clean_text.split()
                 
-                # === ПАТЧ: реплай теперь работает и в ЛС ===
-                reply_to_id = msg.get('id')
+                # === ИСПРАВЛЕНИЕ РЕПЛАЯ (conversation_message_id для бесед) ===
+                reply_to_id = msg.get('conversation_message_id') or msg.get('id')
 
                 if not text and is_ls:
-                    # === ПАТЧ: добавлен reply_to ===
                     send_msg(peer_id, f"👋 Привет! Твой баланс: {balance}$\nЖми «Работа» или пиши /help", get_main_kb(), reply_to=reply_to_id)
                     continue
                 if not text: continue
@@ -277,7 +276,6 @@ while True:
                 elif text == "💼 работа":
                     earned = random.randint(200, 800)
                     update_balance(user_id, earned)
-                    # === ПАТЧ: добавлен reply_to ===
                     send_msg(peer_id, f"✅ Ты заработал {earned}$!\n💰 Баланс: {get_balance(user_id)}$", get_main_kb(), reply_to=reply_to_id)
                 
                 # 3. ПРОФИЛЬ
@@ -508,7 +506,6 @@ while True:
                                 
                             for u in all_users:
                                 update_balance(u[0], amount)
-                                # Пытаемся отправить ЛС (если писал боту)
                                 try:
                                     user_name = get_user_name(user_id)
                                     msg_to_user = (
@@ -516,16 +513,15 @@ while True:
                                         f"👑 Владелец {user_name} выдал вам {amount:,}$!\n".replace(",", ".")
                                     )
                                     send_msg(u[0], msg_to_user)
-                                except:
-                                    pass # Если не писал, то ЛС не отправится, но баланс зачислится
+                                except Exception as e:
+                                    if "901" not in str(e):
+                                        print(f"Ошибка ЛС для {u[0]}: {e}")
                                 
                             owner_name = get_user_name(user_id)
                             msg_text = (
                                 f"💰 Конфиденциальная выдача!\n\n"
                                 f"👑 Владелец {owner_name} выдал всем участникам базы данных (всего: {len(all_users)}) по {amount:,}$!\n".replace(",", ".")
                             )
-                            
-                            # Отправляем красивый отчет в беседу, где ты написал (или в ЛС)
                             send_msg(peer_id, msg_text, reply_to=reply_to_id)
                             
                         # Формат: /выдать все 5900
@@ -550,8 +546,9 @@ while True:
                                         f"👑 Владелец {user_name} выдал вам {amount:,}$!\n".replace(",", ".")
                                     )
                                     send_msg(u[0], msg_to_user)
-                                except:
-                                    pass
+                                except Exception as e:
+                                    if "901" not in str(e):
+                                        print(f"Ошибка ЛС для {u[0]}: {e}")
                                 
                             owner_name = get_user_name(user_id)
                             msg_text = (
