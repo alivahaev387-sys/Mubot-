@@ -354,5 +354,12 @@ vk.updates.on('message_event', async (context) => {
     }
 });
 
-// ВОТ ЗДЕСЬ ИСПРАВЛЕНИЕ (startPolling вместо start)
-vk.updates.startPolling().catch(console.error);
+// ===== ЗАПУСК =====
+(async () => {
+    try {
+        await vk.updates.start();
+        console.log("Бот успешно запущен и слушает события.");
+    } catch (error) {
+        console.error("КРИТИЧЕСКАЯ ОШИБКА ПРИ ЗАПУСКЕ:", error);
+    }
+})();
