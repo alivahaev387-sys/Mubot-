@@ -259,7 +259,7 @@ while True:
                 # 1. ПОМОЩЬ
                 if clean_text in ["help", "помощь", "команды"]:
                     help_text = (
-                        "📖 **Игровые команды:**\n\n"
+                        "📖 Игровые команды:\n\n"
                         "🎰 /рулетка [цвет/чет] [ставка]\n"
                         "🎲 /фортуна - Крутить (100$)\n"
                         "💣 /мины [ставка] - Открывай алмазы\n"
@@ -509,8 +509,8 @@ while True:
                                 try:
                                     user_name = get_user_name(user_id)
                                     msg_to_user = (
-                                        f"💰 **Вам выданы монеты!**\n\n"
-                                        f"👑 Владелец {user_name} выдал вам **{amount:,}$**!\n".replace(",", ".")
+                                        f"💰 Вам выданы монеты!\n\n"
+                                        f"👑 Владелец {user_name} выдал вам {amount:,}$!\n".replace(",", ".")
                                     )
                                     send_msg(u[0], msg_to_user)
                                 except:
@@ -518,8 +518,8 @@ while True:
                                 
                             owner_name = get_user_name(user_id)
                             msg_text = (
-                                f"💰 **Конфиденциальная выдача!**\n\n"
-                                f"👑 Владелец {owner_name} выдал всем участникам базы данных (всего: {len(all_users)}) по **{amount:,}$**!\n".replace(",", ".")
+                                f"💰 Конфиденциальная выдача!\n\n"
+                                f"👑 Владелец {owner_name} выдал всем участникам базы данных (всего: {len(all_users)}) по {amount:,}$!\n".replace(",", ".")
                             )
                             
                             # Отправляем красивый отчет в беседу, где ты написал (или в ЛС)
@@ -543,8 +543,8 @@ while True:
                                 try:
                                     user_name = get_user_name(user_id)
                                     msg_to_user = (
-                                        f"💰 **Вам выданы монеты!**\n\n"
-                                        f"👑 Владелец {user_name} выдал вам **{amount:,}$**!\n".replace(",", ".")
+                                        f"💰 Вам выданы монеты!\n\n"
+                                        f"👑 Владелец {user_name} выдал вам {amount:,}$!\n".replace(",", ".")
                                     )
                                     send_msg(u[0], msg_to_user)
                                 except:
@@ -552,8 +552,8 @@ while True:
                                 
                             owner_name = get_user_name(user_id)
                             msg_text = (
-                                f"💰 **Конфиденциальная выдача!**\n\n"
-                                f"👑 Владелец {owner_name} выдал всем участникам базы данных (всего: {len(all_users)}) по **{amount:,}$**!\n".replace(",", ".")
+                                f"💰 Конфиденциальная выдача!\n\n"
+                                f"👑 Владелец {owner_name} выдал всем участникам базы данных (всего: {len(all_users)}) по {amount:,}$!\n".replace(",", ".")
                             )
                             send_msg(peer_id, msg_text, reply_to=reply_to_id)
                             
@@ -566,8 +566,8 @@ while True:
                             target_name = get_user_name(target_id)
                             owner_name = get_user_name(user_id)
                             msg_text = (
-                                f"💰 **Конфиденциальная выдача!**\n\n"
-                                f"👑 Владелец {owner_name} выдал игроку {target_name} сумму в размере **{amount:,}$**!\n".replace(",", ".")
+                                f"💰 Конфиденциальная выдача!\n\n"
+                                f"👑 Владелец {owner_name} выдал игроку {target_name} сумму в размере {amount:,}$!\n".replace(",", ".")
                             )
                             send_msg(peer_id, msg_text, reply_to=reply_to_id)
                         else:
