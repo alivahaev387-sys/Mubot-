@@ -3,8 +3,13 @@ const sqlite3 = require('sqlite3').verbose();
 const fs = require('fs');
 const path = require('path');
 
+// ===== ПРОВЕРКА ВЕРСИИ NODE.JS =====
+console.log("=========================================");
+console.log("ВЕРСИЯ NODE.JS:", process.version);
+console.log("=========================================");
+
 // ===== НАСТРОЙКИ =====
-// Твой новый токен
+// Твой токен
 const TOKEN = "vk1.a.c1YiC8Y5P5tz8h0AmQdKDJYepilUUC2ew3Krh6kx-nr_w65VYJruj2pfXkcXSWutUwvCqTwCb8MLEMTQnOSNZrCqx1Jh-TaPwF_gEsZOAiq3-g6cJk8RbaOmOqJr3de3-iURXc1pAW2WzI0CvYvu-OPQmAdky5hCe2LrcgqrmHgtAht5gigIedBl29vM_CzjydlVS6y93BGtJnIPzpXb48ciC_kW7yERkY1RL2P_LGQ";
 const ADMIN_ID = 200005093141;
 const BONUS_CD = 600; // 10 минут
