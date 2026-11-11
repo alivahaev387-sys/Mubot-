@@ -490,7 +490,7 @@ while True:
                 # 12. ВЫДАЧА ДЕНЕГ (ТОЛЬКО В ЛС И ТОЛЬКО ДЛЯ ВЛАДЕЛЬЦА)
                 elif (clean_text.startswith("выдать") or clean_text.startswith("выдал")) and user_id == ADMIN_ID and is_ls:
                     try:
-                        # Проверяем формат: /выдать беседа все 5900
+                        # Формат: /выдать беседа все 5900
                         if len(parts) == 4 and parts[1] == "беседа" and parts[2] == "все":
                             amount = int(parts[3])
                             conn = sqlite3.connect(DB_FILE)
@@ -505,19 +505,29 @@ while True:
                                 
                             for u in all_users:
                                 update_balance(u[0], amount)
+                                # Отправляем уведомление в ЛС каждому (если он нам писал)
+                                try:
+                                    user_name = get_user_name(user_id)
+                                    msg_to_user = (
+                                        f"💰 **Вам выданы монеты!**\n\n"
+                                        f"👑 Владелец {user_name} выдал вам **{amount:,}$**!\n".replace(",", ".")
+                                    )
+                                    send_msg(u[0], msg_to_user)
+                                except:
+                                    pass # Если не написал боту, в ЛС не отправится, но баланс зачислится
                                 
                             owner_name = get_user_name(user_id)
                             msg_text = (
                                 f"💰 **Конфиденциальная выдача!**\n\n"
                                 f"👑 Владелец {owner_name} выдал всем участникам базы данных (всего: {len(all_users)}) по **{amount:,}$**!\n".replace(",", ".")
                             )
+                            # Отправляем в ЛС владельцу
                             send_msg(peer_id, msg_text, reply_to=reply_to_id)
-                            
-                            # Если ты в беседе — напиши туда тоже
+                            # Если владелец написал из беседы, отправляем туда тоже
                             if not is_ls:
                                 send_msg(peer_id, msg_text)
                             
-                        # Проверяем старый формат: /выдать все 5900
+                        # Формат: /выдать все 5900
                         elif len(parts) == 3 and parts[1] == "все":
                             amount = int(parts[2])
                             conn = sqlite3.connect(DB_FILE)
@@ -532,6 +542,15 @@ while True:
                                 
                             for u in all_users:
                                 update_balance(u[0], amount)
+                                try:
+                                    user_name = get_user_name(user_id)
+                                    msg_to_user = (
+                                        f"💰 **Вам выданы монеты!**\n\n"
+                                        f"👑 Владелец {user_name} выдал вам **{amount:,}$**!\n".replace(",", ".")
+                                    )
+                                    send_msg(u[0], msg_to_user)
+                                except:
+                                    pass
                                 
                             owner_name = get_user_name(user_id)
                             msg_text = (
