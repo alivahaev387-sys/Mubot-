@@ -38,6 +38,8 @@ async function initDB() {
     await dbRun("CREATE TABLE IF NOT EXISTS promos (code TEXT PRIMARY KEY, amount INTEGER, limit_count INTEGER, used_by TEXT DEFAULT '')");
     await dbRun("CREATE TABLE IF NOT EXISTS games (game_id TEXT PRIMARY KEY, user_id TEXT, bet INTEGER, mines TEXT, opened TEXT, multiplier REAL)");
     await dbRun("CREATE TABLE IF NOT EXISTS blacklist (user_id TEXT PRIMARY KEY, reason TEXT)");
+    // НОВАЯ ТАБЛИЦА ДЛЯ СТАТИСТИКИ СООБЩЕНИЙ
+    await dbRun("CREATE TABLE IF NOT EXISTS chat_messages (peer_id TEXT, user_id TEXT, count INTEGER DEFAULT 0, PRIMARY KEY (peer_id, user_id))");
     console.log("--- БАЗА ДАННЫХ ГОТОВА ---");
 }
 initDB();
@@ -60,27 +62,21 @@ async function updateBalance(userId, amount) {
 async function getFullName(userId) {
     try {
         const [user] = await vk.api.users.get({ user_ids: userId });
-        // Возвращает синюю ссылку без уведомления (благодаря disable_mentions)
         return `[id${userId}|${user.first_name} ${user.last_name || ''}]`;
     } catch { return `[id${userId}|Игрок]`; }
 }
 
 function formatMoney(num) { return num.toLocaleString('ru-RU'); }
 
-// НОВАЯ УМНАЯ ФУНКЦИЯ ПАРСИНГА (Идеальная очистка причины)
+// Функция парсинга цели для /kick и /чсб
 async function getTargetAndReason(message, cmdName) {
     let targetId = null;
     let text = message.text;
-    
-    // Убираем саму команду из текста
     let reason = text.replace(new RegExp(`^\\/?${cmdName}\\s*`, 'i'), '');
 
-    // 1. Если это ответ на сообщение (реплай)
     if (message.hasReplyMessage) {
         targetId = message.replyMessage.senderId;
-    } 
-    // 2. Если цель указана в тексте (через @ или [id|...])
-    else {
+    } else {
         const idMatch = reason.match(/\[id(\d+)\|[^\]]+\]/i);
         if (idMatch) {
             targetId = parseInt(idMatch[1]);
@@ -103,7 +99,6 @@ async function getTargetAndReason(message, cmdName) {
         }
     }
 
-    // Очищаем причину от скобок, кавычек и пробелов
     reason = reason.replace(/[\[\]]/g, '').replace(/"/g, '').trim();
     if (!reason) reason = "Причина не указана";
 
@@ -170,6 +165,11 @@ vk.updates.on('message_new', async (message) => {
         const text = message.text ? message.text.trim().toLowerCase() : '';
         if (!text) return;
 
+        // СЧЕТЧИК СООБЩЕНИЙ (работает только в беседах)
+        if (message.isChat) {
+            await dbRun("INSERT INTO chat_messages (peer_id, user_id, count) VALUES (?, ?, 1) ON CONFLICT(peer_id, user_id) DO UPDATE SET count = count + 1", [String(message.peerId), String(message.senderId)]);
+        }
+
         // Проверка на ЧС
         if (text.startsWith('/')) {
             const isBlacklisted = await dbGet("SELECT reason FROM blacklist WHERE user_id = ?", [String(message.senderId)]);
@@ -189,7 +189,7 @@ vk.updates.on('message_new', async (message) => {
         const balance = await getBalance(userId);
 
         const replyParams = (kb = undefined) => {
-            const p = { disable_mentions: 1 }; // Отключает уведомления (белую галочку)
+            const p = { disable_mentions: 1 };
             if (kb) p.keyboard = kb;
             return p;
         };
@@ -214,25 +214,39 @@ vk.updates.on('message_new', async (message) => {
             return await message.reply(`👤 Профиль:\n💰 Баланс: ${formatMoney(balance)}$\n🆔 ID: ${userId}`, replyParams(isLs ? mainKb : undefined));
         }
 
-        if (cleanText === 'топ') {
-            const rows = await dbAll("SELECT user_id, balance FROM users WHERE balance > 2 ORDER BY balance DESC LIMIT 20");
-            if (rows.length === 0) return await message.reply("🏆 Топ пуст.", replyParams(isLs ? mainKb : undefined));
+        // НОВЫЙ ТОП (ПО СООБЩЕНИЯМ В БЕСЕДЕ)
+        if (cleanText === 'топ' || cleanText === 'top') {
+            if (isLs) {
+                return await message.reply("❌ Топ по сообщениям работает только в беседах!", replyParams());
+            }
+
+            const rows = await dbAll("SELECT user_id, count FROM chat_messages WHERE peer_id = ? ORDER BY count DESC LIMIT 10", [String(peerId)]);
+            if (rows.length === 0) return await message.reply("🏆 В этой беседе еще никто не писал.", replyParams());
 
             const userIds = rows.map(r => r.user_id);
             let usersInfo = [];
             try { usersInfo = await vk.api.users.get({ user_ids: userIds.join(','), fields: 'deactivated' }); } catch (e) {}
 
-            let topText = "🏆 Топ 10 богачей:\n\n";
+            let topText = "⭐ ТОП 10 ПОЛЬЗОВАТЕЛЕЙ ПО СООБЩЕНИЯМ\n\n";
             let count = 0;
+            const emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"];
+            
             for (const r of rows) {
-                if (count >= 10) break;
                 const uInfo = usersInfo.find(u => u.id == r.user_id);
                 if (uInfo && !uInfo.deactivated) {
+                    topText += `${emojis[count]} [id${uInfo.id}|${uInfo.first_name} ${uInfo.last_name || ''}] - ${r.count} сообщений\n`;
                     count++;
-                    topText += `${count}. [id${uInfo.id}|${uInfo.first_name} ${uInfo.last_name || ''}] — ${formatMoney(r.balance)}$\n`;
                 }
             }
-            return await message.reply(topText, replyParams(isLs ? mainKb : undefined));
+
+            // Добавляем кнопку для переключения на топ по монетам
+            const topKb = Keyboard.builder().inline().callbackButton({
+                label: '💰 Топ по монетам',
+                payload: { cmd: 'top_coins' },
+                color: Keyboard.SECONDARY_COLOR
+            });
+
+            return await message.reply(topText, replyParams(topKb));
         }
 
         if (cleanText.startsWith('рулетка') || cleanText.startsWith('рул')) {
@@ -357,13 +371,10 @@ vk.updates.on('message_new', async (message) => {
 
         // ===== АДМИНСКИЕ КОМАНДЫ =====
         if (userId === ADMIN_ID) {
-            // КОМАНДА /KICK (Формат как у Star Manager)
             if (cleanText.startsWith('kick')) {
                 const { targetId, reason } = await getTargetAndReason(message, 'kick');
 
-                if (!targetId) {
-                    return await message.reply("⚠️ Указанный пользователь не является участником данной беседы, либо же имеет статус выше Вашего.", replyParams());
-                }
+                if (!targetId) return await message.reply("⚠️ Указанный пользователь не является участником данной беседы, либо же имеет статус выше Вашего.", replyParams());
                 if (targetId === ADMIN_ID) return await message.reply("❌ Вы не можете исключить самого себя.", replyParams());
                 if (!message.isChat) return await message.reply("❌ Эту команду можно использовать только в беседе.", replyParams());
 
@@ -372,51 +383,36 @@ vk.updates.on('message_new', async (message) => {
                 const senderName = await getFullName(message.senderId);
 
                 try {
-                    await vk.api.messages.removeChatUser({
-                        chat_id: chatId,
-                        user_id: targetId,
-                        group_id: GROUP_ID
-                    });
-                    
-                    const reportMsg = `${senderName} исключил(-а) из беседы пользователя ${targetName} по причине: "${reason}"`;
-                    return await message.reply(reportMsg, replyParams());
+                    await vk.api.messages.removeChatUser({ chat_id: chatId, user_id: targetId, group_id: GROUP_ID });
+                    return await message.reply(`${senderName} исключил(-а) из беседы пользователя ${targetName} по причине: "${reason}"`, replyParams());
                 } catch (e) {
                     console.error("Ошибка кика:", e);
                     return await message.reply(`⚠️ Указанный пользователь не является участником данной беседы, либо же имеет статус выше Вашего.`, replyParams());
                 }
             }
 
-            // КОМАНДА /ЧСБ (Формат как у Star Manager)
             if (cleanText.startsWith('чсб')) {
                 const { targetId, reason } = await getTargetAndReason(message, 'чсб');
 
-                if (!targetId) {
-                    return await message.reply("⚠️ Указанный пользователь не является участником данной беседы, либо же имеет статус выше Вашего.", replyParams());
-                }
+                if (!targetId) return await message.reply("⚠️ Указанный пользователь не является участником данной беседы, либо же имеет статус выше Вашего.", replyParams());
                 if (targetId === ADMIN_ID) return await message.reply("❌ Вы не можете занести себя в ЧС.", replyParams());
                 
                 await dbRun("REPLACE INTO blacklist (user_id, reason) VALUES (?, ?)", [String(targetId), reason]);
                 const targetName = await getFullName(targetId);
                 const senderName = await getFullName(message.senderId);
                 
-                const reportMsg = `${senderName} занес(-ла) в ЧС бота пользователя ${targetName} по причине: "${reason}"`;
-                return await message.reply(reportMsg, replyParams());
+                return await message.reply(`${senderName} занес(-ла) в ЧС бота пользователя ${targetName} по причине: "${reason}"`, replyParams());
             }
 
-            // КОМАНДА /РАЗЧСБ (Формат как у Star Manager)
             if (cleanText.startsWith('разчсб')) {
                 const { targetId } = await getTargetAndReason(message, 'разчсб');
-
-                if (!targetId) {
-                    return await message.reply("⚠️ Указанный пользователь не является участником данной беседы, либо же имеет статус выше Вашего.", replyParams());
-                }
+                if (!targetId) return await message.reply("⚠️ Указанный пользователь не является участником данной беседы, либо же имеет статус выше Вашего.", replyParams());
 
                 await dbRun("DELETE FROM blacklist WHERE user_id = ?", [String(targetId)]);
                 const targetName = await getFullName(targetId);
                 const senderName = await getFullName(message.senderId);
                 
-                const reportMsg = `${senderName} разбанил(-а) пользователя ${targetName} в ЧС бота.`;
-                return await message.reply(reportMsg, replyParams());
+                return await message.reply(`${senderName} разбанил(-а) пользователя ${targetName} в ЧС бота.`, replyParams());
             }
 
             if (cleanText === 'cp') {
@@ -532,6 +528,39 @@ vk.updates.on('message_event', async (context) => {
                 });
                 return;
             }
+        }
+
+        // ОБРАБОТКА КНОПКИ "ТОП ПО МОНЕТАМ"
+        if (payload.cmd === 'top_coins') {
+            const rows = await dbAll("SELECT user_id, balance FROM users WHERE balance > 2 ORDER BY balance DESC LIMIT 20");
+            if (rows.length === 0) {
+                return await context.answer({ type: 'show_snackbar', text: '❌ Топ пуст.' });
+            }
+
+            const userIds = rows.map(r => r.user_id);
+            let usersInfo = [];
+            try { usersInfo = await vk.api.users.get({ user_ids: userIds.join(','), fields: 'deactivated' }); } catch (e) {}
+
+            let topText = "🏆 Топ 10 богачей:\n\n";
+            let count = 0;
+            for (const r of rows) {
+                if (count >= 10) break;
+                const uInfo = usersInfo.find(u => u.id == r.user_id);
+                if (uInfo && !uInfo.deactivated) {
+                    count++;
+                    topText += `${count}. [id${uInfo.id}|${uInfo.first_name} ${uInfo.last_name || ''}] — ${formatMoney(r.balance)}$\n`;
+                }
+            }
+
+            await context.answer();
+            // Меняем сообщение, убираем клавиатуру
+            await vk.api.messages.edit({
+                peer_id: context.peerId,
+                conversation_message_id: context.conversationMessageId,
+                message: topText,
+                keyboard: ""
+            });
+            return;
         }
 
         if (payload.cmd === 'mines_set') {
