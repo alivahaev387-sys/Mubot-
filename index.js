@@ -164,7 +164,7 @@ const getTopMsgKb = () => Keyboard.builder().inline().callbackButton({
 
 // Кнопка для переключения обратно на сообщения
 const getTopCoinsKb = () => Keyboard.builder().inline().callbackButton({
-    label: '🔙 Назад к сообщениям',
+    label: '🔙 Назад',
     payload: { cmd: 'top_messages' },
     color: Keyboard.SECONDARY_COLOR
 }).toString();
@@ -618,7 +618,7 @@ vk.updates.on('message_event', async (context) => {
                 
                 const msgText = `💣 Мины\nСтавка: ${row.bet}$ | Мин: ${count} из 9\n\nВыбери клетку, чтобы открыть алмаз 💎`;
                 
-                await context.answer(); // Убираем загрузку
+                await context.answer(); 
                 
                 await vk.api.messages.edit({
                     peer_id: context.peerId,
