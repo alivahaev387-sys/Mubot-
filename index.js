@@ -60,11 +60,55 @@ async function updateBalance(userId, amount) {
 async function getFullName(userId) {
     try {
         const [user] = await vk.api.users.get({ user_ids: userId });
+        // Возвращает синюю ссылку без уведомления (благодаря disable_mentions)
         return `[id${userId}|${user.first_name} ${user.last_name || ''}]`;
-    } catch { return `Игрок`; }
+    } catch { return `[id${userId}|Игрок]`; }
 }
 
 function formatMoney(num) { return num.toLocaleString('ru-RU'); }
+
+// НОВАЯ УМНАЯ ФУНКЦИЯ ПАРСИНГА (Идеальная очистка причины)
+async function getTargetAndReason(message, cmdName) {
+    let targetId = null;
+    let text = message.text;
+    
+    // Убираем саму команду из текста
+    let reason = text.replace(new RegExp(`^\\/?${cmdName}\\s*`, 'i'), '');
+
+    // 1. Если это ответ на сообщение (реплай)
+    if (message.hasReplyMessage) {
+        targetId = message.replyMessage.senderId;
+    } 
+    // 2. Если цель указана в тексте (через @ или [id|...])
+    else {
+        const idMatch = reason.match(/\[id(\d+)\|[^\]]+\]/i);
+        if (idMatch) {
+            targetId = parseInt(idMatch[1]);
+            reason = reason.replace(idMatch[0], ''); 
+        } else {
+            const atIdMatch = reason.match(/@id(\d+)/i);
+            if (atIdMatch) {
+                targetId = parseInt(atIdMatch[1]);
+                reason = reason.replace(atIdMatch[0], ''); 
+            } else {
+                const mentionMatch = reason.match(/@([a-zA-Z0-9._]+)/);
+                if (mentionMatch) {
+                    try {
+                        const res = await vk.api.utils.resolveScreenName({ screen_name: mentionMatch[1] });
+                        if (res.type === 'user') targetId = res.object_id;
+                    } catch (e) {}
+                    reason = reason.replace(mentionMatch[0], ''); 
+                }
+            }
+        }
+    }
+
+    // Очищаем причину от скобок, кавычек и пробелов
+    reason = reason.replace(/[\[\]]/g, '').replace(/"/g, '').trim();
+    if (!reason) reason = "Причина не указана";
+
+    return { targetId, reason };
+}
 
 // ===== КЛАВИАТУРЫ =====
 const mainKb = Keyboard.builder()
@@ -145,7 +189,7 @@ vk.updates.on('message_new', async (message) => {
         const balance = await getBalance(userId);
 
         const replyParams = (kb = undefined) => {
-            const p = { disable_mentions: 1 };
+            const p = { disable_mentions: 1 }; // Отключает уведомления (белую галочку)
             if (kb) p.keyboard = kb;
             return p;
         };
@@ -313,37 +357,19 @@ vk.updates.on('message_new', async (message) => {
 
         // ===== АДМИНСКИЕ КОМАНДЫ =====
         if (userId === ADMIN_ID) {
-            // НОВАЯ КОМАНДА: /kick
+            // КОМАНДА /KICK (Формат как у Star Manager)
             if (cleanText.startsWith('kick')) {
-                let targetId = null;
-                let reason = "";
-
-                // Ищем цель (реплай или упоминание)
-                if (message.hasReplyMessage && message.replyMessage) {
-                    targetId = message.replyMessage.senderId;
-                    reason = parts.slice(1).join(' '); 
-                } else {
-                    const idMatch = text.match(/\[id(\d+)\|/i) || text.match(/@id(\d+)/i);
-                    if (idMatch) {
-                        targetId = parseInt(idMatch[1]);
-                        reason = text.replace(/\/?kick/i, '').replace(idMatch[0], '').trim();
-                    }
-                }
+                const { targetId, reason } = await getTargetAndReason(message, 'kick');
 
                 if (!targetId) {
-                    return await message.reply("❌ Ответьте на сообщение нарушителя или укажите его упоминание (например: /kick @id123456).", replyParams());
+                    return await message.reply("⚠️ Указанный пользователь не является участником данной беседы, либо же имеет статус выше Вашего.", replyParams());
                 }
-
                 if (targetId === ADMIN_ID) return await message.reply("❌ Вы не можете исключить самого себя.", replyParams());
-                if (targetId === GROUP_ID) return await message.reply("❌ Нельзя исключить бота через эту команду.", replyParams());
-
-                // Проверка, что это беседа, а не ЛС
-                if (!message.isChat) {
-                    return await message.reply("❌ Эту команду можно использовать только в беседе.", replyParams());
-                }
+                if (!message.isChat) return await message.reply("❌ Эту команду можно использовать только в беседе.", replyParams());
 
                 const chatId = message.peerId - 2000000000;
                 const targetName = await getFullName(targetId);
+                const senderName = await getFullName(message.senderId);
 
                 try {
                     await vk.api.messages.removeChatUser({
@@ -352,61 +378,45 @@ vk.updates.on('message_new', async (message) => {
                         group_id: GROUP_ID
                     });
                     
-                    let successMsg = `✅ Пользователь ${targetName} был исключен из беседы.`;
-                    if (reason) successMsg += `\n📝 Причина: ${reason}`;
-                    
-                    return await message.reply(successMsg, replyParams());
+                    const reportMsg = `${senderName} исключил(-а) из беседы пользователя ${targetName} по причине: "${reason}"`;
+                    return await message.reply(reportMsg, replyParams());
                 } catch (e) {
                     console.error("Ошибка кика:", e);
-                    return await message.reply(`⚠️ Не удалось исключить пользователя.\nУбедитесь, что бот является администратором беседы и имеет право исключать участников.\nОшибка: ${e.message}`, replyParams());
+                    return await message.reply(`⚠️ Указанный пользователь не является участником данной беседы, либо же имеет статус выше Вашего.`, replyParams());
                 }
             }
 
+            // КОМАНДА /ЧСБ (Формат как у Star Manager)
             if (cleanText.startsWith('чсб')) {
-                let targetId = null;
-                let reason = "";
-
-                if (message.hasReplyMessage && message.replyMessage) {
-                    targetId = message.replyMessage.senderId;
-                    reason = parts.slice(1).join(' '); 
-                } else {
-                    const idMatch = text.match(/\[id(\d+)\|/i) || text.match(/@id(\d+)/i);
-                    if (idMatch) {
-                        targetId = parseInt(idMatch[1]);
-                        reason = text.replace(/\/?чсб/i, '').replace(idMatch[0], '').trim();
-                    }
-                }
+                const { targetId, reason } = await getTargetAndReason(message, 'чсб');
 
                 if (!targetId) {
-                    return await message.reply("❌ Ответьте (реплаем) на сообщение нарушителя или укажите его упоминание (например: /чсб @id123456 спам).", replyParams());
+                    return await message.reply("⚠️ Указанный пользователь не является участником данной беседы, либо же имеет статус выше Вашего.", replyParams());
                 }
-
                 if (targetId === ADMIN_ID) return await message.reply("❌ Вы не можете занести себя в ЧС.", replyParams());
-                
-                if (!reason) reason = 'Без указания причины';
                 
                 await dbRun("REPLACE INTO blacklist (user_id, reason) VALUES (?, ?)", [String(targetId), reason]);
                 const targetName = await getFullName(targetId);
-                return await message.reply(`✅ Пользователь ${targetName} успешно занесен в ЧС бота.\n📝 Причина: ${reason}`, replyParams());
+                const senderName = await getFullName(message.senderId);
+                
+                const reportMsg = `${senderName} занес(-ла) в ЧС бота пользователя ${targetName} по причине: "${reason}"`;
+                return await message.reply(reportMsg, replyParams());
             }
 
+            // КОМАНДА /РАЗЧСБ (Формат как у Star Manager)
             if (cleanText.startsWith('разчсб')) {
-                let targetId = null;
-
-                if (message.hasReplyMessage && message.replyMessage) {
-                    targetId = message.replyMessage.senderId;
-                } else {
-                    const idMatch = text.match(/\[id(\d+)\|/i) || text.match(/@id(\d+)/i);
-                    if (idMatch) targetId = parseInt(idMatch[1]);
-                }
+                const { targetId } = await getTargetAndReason(message, 'разчсб');
 
                 if (!targetId) {
-                    return await message.reply("❌ Ответьте на сообщение пользователя или укажите его упоминание (например: /разчсб @id123456).", replyParams());
+                    return await message.reply("⚠️ Указанный пользователь не является участником данной беседы, либо же имеет статус выше Вашего.", replyParams());
                 }
 
                 await dbRun("DELETE FROM blacklist WHERE user_id = ?", [String(targetId)]);
                 const targetName = await getFullName(targetId);
-                return await message.reply(`✅ Пользователь ${targetName} успешно удален из ЧС бота.`, replyParams());
+                const senderName = await getFullName(message.senderId);
+                
+                const reportMsg = `${senderName} разбанил(-а) пользователя ${targetName} в ЧС бота.`;
+                return await message.reply(reportMsg, replyParams());
             }
 
             if (cleanText === 'cp') {
