@@ -38,7 +38,6 @@ async function initDB() {
     await dbRun("CREATE TABLE IF NOT EXISTS promos (code TEXT PRIMARY KEY, amount INTEGER, limit_count INTEGER, used_by TEXT DEFAULT '')");
     await dbRun("CREATE TABLE IF NOT EXISTS games (game_id TEXT PRIMARY KEY, user_id TEXT, bet INTEGER, mines TEXT, opened TEXT, multiplier REAL)");
     await dbRun("CREATE TABLE IF NOT EXISTS blacklist (user_id TEXT PRIMARY KEY, reason TEXT)");
-    // НОВАЯ ТАБЛИЦА ДЛЯ СТАТИСТИКИ СООБЩЕНИЙ
     await dbRun("CREATE TABLE IF NOT EXISTS chat_messages (peer_id TEXT, user_id TEXT, count INTEGER DEFAULT 0, PRIMARY KEY (peer_id, user_id))");
     console.log("--- БАЗА ДАННЫХ ГОТОВА ---");
 }
@@ -68,7 +67,6 @@ async function getFullName(userId) {
 
 function formatMoney(num) { return num.toLocaleString('ru-RU'); }
 
-// Функция парсинга цели для /kick и /чсб
 async function getTargetAndReason(message, cmdName) {
     let targetId = null;
     let text = message.text;
@@ -156,6 +154,18 @@ const getMinesFieldKb = (gameId, opened, mines, isGameOver = false) => {
     return kb.toString();
 };
 
+const getTopMsgKb = () => Keyboard.builder().inline().callbackButton({
+    label: '💰 Топ по монетам',
+    payload: { cmd: 'top_coins' },
+    color: Keyboard.SECONDARY_COLOR
+}).toString();
+
+const getTopCoinsKb = () => Keyboard.builder().inline().callbackButton({
+    label: '🔙 Назад к сообщениям',
+    payload: { cmd: 'top_messages' },
+    color: Keyboard.SECONDARY_COLOR
+}).toString();
+
 // ===== ОБРАБОТКА СООБЩЕНИЙ =====
 vk.updates.on('message_new', async (message) => {
     if (message.isOutbox) return;
@@ -165,16 +175,14 @@ vk.updates.on('message_new', async (message) => {
         const text = message.text ? message.text.trim().toLowerCase() : '';
         if (!text) return;
 
-        // СЧЕТЧИК СООБЩЕНИЙ (работает только в беседах)
         if (message.isChat) {
             await dbRun("INSERT INTO chat_messages (peer_id, user_id, count) VALUES (?, ?, 1) ON CONFLICT(peer_id, user_id) DO UPDATE SET count = count + 1", [String(message.peerId), String(message.senderId)]);
         }
 
-        // Проверка на ЧС
         if (text.startsWith('/')) {
             const isBlacklisted = await dbGet("SELECT reason FROM blacklist WHERE user_id = ?", [String(message.senderId)]);
             if (isBlacklisted) {
-                return await message.reply(`🚫 Доступ запрещен!\n\nВы находитесь в черном списке бота.\n📝 Причина: ${isBlacklisted.reason}\n\nЕсли вы считаете, что это ошибка, обратитесь к владельцу.`, { disable_mentions: 1 });
+                return await message.reply(`🚫 Доступ запрещен!\n\nВы находитесь в черном списке бота.\n📝 Причина: ${isBlacklisted.reason}`, { disable_mentions: 1 });
             }
         }
 
@@ -194,7 +202,6 @@ vk.updates.on('message_new', async (message) => {
             return p;
         };
 
-        // --- КОМАНДЫ ---
         if (text.includes('начать') || text.includes('start')) {
             return await message.reply("👋 Привет! Я игровой бот. Выбирай действие на клавиатуре или напиши /help.", replyParams(isLs ? mainKb : undefined));
         }
@@ -214,11 +221,9 @@ vk.updates.on('message_new', async (message) => {
             return await message.reply(`👤 Профиль:\n💰 Баланс: ${formatMoney(balance)}$\n🆔 ID: ${userId}`, replyParams(isLs ? mainKb : undefined));
         }
 
-        // НОВЫЙ ТОП (ПО СООБЩЕНИЯМ В БЕСЕДЕ)
+        // ТОП (ПО СООБЩЕНИЯМ В БЕСЕДЕ)
         if (cleanText === 'топ' || cleanText === 'top') {
-            if (isLs) {
-                return await message.reply("❌ Топ по сообщениям работает только в беседах!", replyParams());
-            }
+            if (isLs) return await message.reply("❌ Топ по сообщениям работает только в беседах!", replyParams());
 
             const rows = await dbAll("SELECT user_id, count FROM chat_messages WHERE peer_id = ? ORDER BY count DESC LIMIT 10", [String(peerId)]);
             if (rows.length === 0) return await message.reply("🏆 В этой беседе еще никто не писал.", replyParams());
@@ -239,14 +244,7 @@ vk.updates.on('message_new', async (message) => {
                 }
             }
 
-            // Добавляем кнопку для переключения на топ по монетам
-            const topKb = Keyboard.builder().inline().callbackButton({
-                label: '💰 Топ по монетам',
-                payload: { cmd: 'top_coins' },
-                color: Keyboard.SECONDARY_COLOR
-            });
-
-            return await message.reply(topText, replyParams(topKb));
+            return await message.reply(topText, replyParams(getTopMsgKb()));
         }
 
         if (cleanText.startsWith('рулетка') || cleanText.startsWith('рул')) {
@@ -530,12 +528,9 @@ vk.updates.on('message_event', async (context) => {
             }
         }
 
-        // ОБРАБОТКА КНОПКИ "ТОП ПО МОНЕТАМ"
         if (payload.cmd === 'top_coins') {
             const rows = await dbAll("SELECT user_id, balance FROM users WHERE balance > 2 ORDER BY balance DESC LIMIT 20");
-            if (rows.length === 0) {
-                return await context.answer({ type: 'show_snackbar', text: '❌ Топ пуст.' });
-            }
+            if (rows.length === 0) return await context.answer({ type: 'show_snackbar', text: '❌ Топ пуст.' });
 
             const userIds = rows.map(r => r.user_id);
             let usersInfo = [];
@@ -553,12 +548,43 @@ vk.updates.on('message_event', async (context) => {
             }
 
             await context.answer();
-            // Меняем сообщение, убираем клавиатуру
             await vk.api.messages.edit({
                 peer_id: context.peerId,
                 conversation_message_id: context.conversationMessageId,
                 message: topText,
-                keyboard: ""
+                keyboard: getTopCoinsKb()
+            });
+            return;
+        }
+
+        if (payload.cmd === 'top_messages') {
+            const peerId = context.peerId;
+            const rows = await dbAll("SELECT user_id, count FROM chat_messages WHERE peer_id = ? ORDER BY count DESC LIMIT 10", [String(peerId)]);
+            
+            if (rows.length === 0) return await context.answer({ type: 'show_snackbar', text: '🏆 В этой беседе еще никто не писал.' });
+
+            const userIds = rows.map(r => r.user_id);
+            let usersInfo = [];
+            try { usersInfo = await vk.api.users.get({ user_ids: userIds.join(','), fields: 'deactivated' }); } catch (e) {}
+
+            let topText = "⭐ ТОП 10 ПОЛЬЗОВАТЕЛЕЙ ПО СООБЩЕНИЯМ\n\n";
+            let count = 0;
+            const emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"];
+            
+            for (const r of rows) {
+                const uInfo = usersInfo.find(u => u.id == r.user_id);
+                if (uInfo && !uInfo.deactivated) {
+                    topText += `${emojis[count]} [id${uInfo.id}|${uInfo.first_name} ${uInfo.last_name || ''}] - ${r.count} сообщений\n`;
+                    count++;
+                }
+            }
+
+            await context.answer();
+            await vk.api.messages.edit({
+                peer_id: context.peerId,
+                conversation_message_id: context.conversationMessageId,
+                message: topText,
+                keyboard: getTopMsgKb()
             });
             return;
         }
