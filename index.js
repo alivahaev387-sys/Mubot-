@@ -37,6 +37,7 @@ async function initDB() {
     await dbRun("CREATE TABLE IF NOT EXISTS fortune_cd (user_id TEXT PRIMARY KEY, last_used INTEGER)");
     await dbRun("CREATE TABLE IF NOT EXISTS promos (code TEXT PRIMARY KEY, amount INTEGER, limit_count INTEGER, used_by TEXT DEFAULT '')");
     await dbRun("CREATE TABLE IF NOT EXISTS games (game_id TEXT PRIMARY KEY, user_id TEXT, bet INTEGER, mines TEXT, opened TEXT, multiplier REAL)");
+    await dbRun("CREATE TABLE IF NOT EXISTS blacklist (user_id TEXT PRIMARY KEY, reason TEXT)");
     console.log("--- БАЗА ДАННЫХ ГОТОВА ---");
 }
 initDB();
@@ -124,6 +125,14 @@ vk.updates.on('message_new', async (message) => {
     try {
         const text = message.text ? message.text.trim().toLowerCase() : '';
         if (!text) return;
+
+        // Проверка на ЧС (только если человек пытается использовать команду)
+        if (text.startsWith('/')) {
+            const isBlacklisted = await dbGet("SELECT reason FROM blacklist WHERE user_id = ?", [String(message.senderId)]);
+            if (isBlacklisted) {
+                return await message.reply(`🚫 Доступ запрещен!\n\nВы находитесь в черном списке бота.\n📝 Причина: ${isBlacklisted.reason}\n\nЕсли вы считаете, что это ошибка, обратитесь к владельцу.`, { disable_mentions: 1 });
+            }
+        }
 
         if (!text.startsWith('/') && text !== '💼 работа') return;
 
@@ -304,6 +313,59 @@ vk.updates.on('message_new', async (message) => {
 
         // ===== АДМИНСКИЕ КОМАНДЫ =====
         if (userId === ADMIN_ID) {
+            // Команда ЧС
+            if (cleanText.startsWith('чсб')) {
+                let targetId = null;
+                let reason = "";
+
+                // 1. Пытаемся взять из реплая
+                if (message.hasReplyMessage && message.replyMessage) {
+                    targetId = message.replyMessage.senderId;
+                    reason = parts.slice(1).join(' '); 
+                } 
+                // 2. Если нет реплая, ищем упоминание (формат [id123|Имя] или @id123)
+                else {
+                    const idMatch = text.match(/\[id(\d+)\|/i) || text.match(/@id(\d+)/i);
+                    if (idMatch) {
+                        targetId = parseInt(idMatch[1]);
+                        // Убираем команду и упоминание из текста, чтобы получить чистую причину
+                        reason = text.replace(/\/?чсб/i, '').replace(idMatch[0], '').trim();
+                    }
+                }
+
+                if (!targetId) {
+                    return await message.reply("❌ Ответьте (реплаем) на сообщение нарушителя или укажите его упоминание (например: /чсб @id123456 спам).", replyParams());
+                }
+
+                if (targetId === ADMIN_ID) return await message.reply("❌ Вы не можете занести себя в ЧС.", replyParams());
+                
+                if (!reason) reason = 'Без указания причины';
+                
+                await dbRun("REPLACE INTO blacklist (user_id, reason) VALUES (?, ?)", [String(targetId), reason]);
+                const targetName = await getFullName(targetId);
+                return await message.reply(`✅ Пользователь ${targetName} успешно занесен в ЧС бота.\n📝 Причина: ${reason}`, replyParams());
+            }
+
+            // Разбан
+            if (cleanText.startsWith('разчсб')) {
+                let targetId = null;
+
+                if (message.hasReplyMessage && message.replyMessage) {
+                    targetId = message.replyMessage.senderId;
+                } else {
+                    const idMatch = text.match(/\[id(\d+)\|/i) || text.match(/@id(\d+)/i);
+                    if (idMatch) targetId = parseInt(idMatch[1]);
+                }
+
+                if (!targetId) {
+                    return await message.reply("❌ Ответьте на сообщение пользователя или укажите его упоминание (например: /разчсб @id123456).", replyParams());
+                }
+
+                await dbRun("DELETE FROM blacklist WHERE user_id = ?", [String(targetId)]);
+                const targetName = await getFullName(targetId);
+                return await message.reply(`✅ Пользователь ${targetName} успешно удален из ЧС бота.`, replyParams());
+            }
+
             if (cleanText === 'cp') {
                 await dbRun("DELETE FROM promos");
                 return await message.reply("✅ Все активные промокоды были успешно удалены.", replyParams());
@@ -375,6 +437,10 @@ vk.updates.on('message_new', async (message) => {
 
     } catch (error) {
         console.error("ОШИБКА ПРИ ОБРАБОТКЕ:", error);
+        // Если произошла ошибка, бот сообщит о ней в чат, чтобы не молчать
+        try {
+            await message.reply(`⚠️ Произошла ошибка при выполнении команды: ${error.message}`, { disable_mentions: 1 });
+        } catch (e) {}
     }
 });
 
@@ -422,8 +488,6 @@ vk.updates.on('message_event', async (context) => {
             
             const row = await dbGet("SELECT bet FROM games WHERE game_id = ? AND user_id = ?", [gameId, String(userId)]);
             if (row) {
-                // ИСПРАВЛЕНИЕ: Убрали проверку "Игра уже началась" и снекбар.
-                // Теперь просто генерируем поле и обновляем сообщение.
                 const minesArr = [];
                 while(minesArr.length < count) {
                     const r = Math.floor(Math.random() * 9) + 1;
@@ -434,20 +498,14 @@ vk.updates.on('message_event', async (context) => {
                 
                 const msgText = `💣 Мины\nСтавка: ${row.bet}$ | Мин: ${count} из 9\n\nВыбери клетку, чтобы открыть алмаз 💎`;
                 
-                // Закрываем загрузку кнопки (без всплывающего текста)
                 await context.answer();
                 
-                // Обновляем сообщение на поле
-                try {
-                    await vk.api.messages.edit({
-                        peer_id: context.peerId,
-                        conversation_message_id: context.conversationMessageId,
-                        message: msgText,
-                        keyboard: getMinesFieldKb(gameId, [], minesArr)
-                    });
-                } catch (e) {
-                    console.error("Ошибка редактирования сообщения (mines_set):", e);
-                }
+                await vk.api.messages.edit({
+                    peer_id: context.peerId,
+                    conversation_message_id: context.conversationMessageId,
+                    message: msgText,
+                    keyboard: getMinesFieldKb(gameId, [], minesArr)
+                });
                 return;
             }
         }
