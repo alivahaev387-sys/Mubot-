@@ -126,7 +126,7 @@ vk.updates.on('message_new', async (message) => {
         const text = message.text ? message.text.trim().toLowerCase() : '';
         if (!text) return;
 
-        // Проверка на ЧС (только если человек пытается использовать команду)
+        // Проверка на ЧС
         if (text.startsWith('/')) {
             const isBlacklisted = await dbGet("SELECT reason FROM blacklist WHERE user_id = ?", [String(message.senderId)]);
             if (isBlacklisted) {
@@ -313,22 +313,66 @@ vk.updates.on('message_new', async (message) => {
 
         // ===== АДМИНСКИЕ КОМАНДЫ =====
         if (userId === ADMIN_ID) {
-            // Команда ЧС
+            // НОВАЯ КОМАНДА: /kick
+            if (cleanText.startsWith('kick')) {
+                let targetId = null;
+                let reason = "";
+
+                // Ищем цель (реплай или упоминание)
+                if (message.hasReplyMessage && message.replyMessage) {
+                    targetId = message.replyMessage.senderId;
+                    reason = parts.slice(1).join(' '); 
+                } else {
+                    const idMatch = text.match(/\[id(\d+)\|/i) || text.match(/@id(\d+)/i);
+                    if (idMatch) {
+                        targetId = parseInt(idMatch[1]);
+                        reason = text.replace(/\/?kick/i, '').replace(idMatch[0], '').trim();
+                    }
+                }
+
+                if (!targetId) {
+                    return await message.reply("❌ Ответьте на сообщение нарушителя или укажите его упоминание (например: /kick @id123456).", replyParams());
+                }
+
+                if (targetId === ADMIN_ID) return await message.reply("❌ Вы не можете исключить самого себя.", replyParams());
+                if (targetId === GROUP_ID) return await message.reply("❌ Нельзя исключить бота через эту команду.", replyParams());
+
+                // Проверка, что это беседа, а не ЛС
+                if (!message.isChat) {
+                    return await message.reply("❌ Эту команду можно использовать только в беседе.", replyParams());
+                }
+
+                const chatId = message.peerId - 2000000000;
+                const targetName = await getFullName(targetId);
+
+                try {
+                    await vk.api.messages.removeChatUser({
+                        chat_id: chatId,
+                        user_id: targetId,
+                        group_id: GROUP_ID
+                    });
+                    
+                    let successMsg = `✅ Пользователь ${targetName} был исключен из беседы.`;
+                    if (reason) successMsg += `\n📝 Причина: ${reason}`;
+                    
+                    return await message.reply(successMsg, replyParams());
+                } catch (e) {
+                    console.error("Ошибка кика:", e);
+                    return await message.reply(`⚠️ Не удалось исключить пользователя.\nУбедитесь, что бот является администратором беседы и имеет право исключать участников.\nОшибка: ${e.message}`, replyParams());
+                }
+            }
+
             if (cleanText.startsWith('чсб')) {
                 let targetId = null;
                 let reason = "";
 
-                // 1. Пытаемся взять из реплая
                 if (message.hasReplyMessage && message.replyMessage) {
                     targetId = message.replyMessage.senderId;
                     reason = parts.slice(1).join(' '); 
-                } 
-                // 2. Если нет реплая, ищем упоминание (формат [id123|Имя] или @id123)
-                else {
+                } else {
                     const idMatch = text.match(/\[id(\d+)\|/i) || text.match(/@id(\d+)/i);
                     if (idMatch) {
                         targetId = parseInt(idMatch[1]);
-                        // Убираем команду и упоминание из текста, чтобы получить чистую причину
                         reason = text.replace(/\/?чсб/i, '').replace(idMatch[0], '').trim();
                     }
                 }
@@ -346,7 +390,6 @@ vk.updates.on('message_new', async (message) => {
                 return await message.reply(`✅ Пользователь ${targetName} успешно занесен в ЧС бота.\n📝 Причина: ${reason}`, replyParams());
             }
 
-            // Разбан
             if (cleanText.startsWith('разчсб')) {
                 let targetId = null;
 
@@ -437,7 +480,6 @@ vk.updates.on('message_new', async (message) => {
 
     } catch (error) {
         console.error("ОШИБКА ПРИ ОБРАБОТКЕ:", error);
-        // Если произошла ошибка, бот сообщит о ней в чат, чтобы не молчать
         try {
             await message.reply(`⚠️ Произошла ошибка при выполнении команды: ${error.message}`, { disable_mentions: 1 });
         } catch (e) {}
