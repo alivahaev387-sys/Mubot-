@@ -133,31 +133,45 @@ function formatMoney(num) {
     return n.toLocaleString('ru-RU'); 
 }
 
+// ===== УЛУЧШЕННЫЙ ПАРСЕР УПОМИНАНИЙ И ССЫЛОК =====
 async function getTargetAndReason(message, cmdName) {
     let targetId = null;
-    let text = message.text;
+    let text = message.text || '';
     let reason = text.replace(new RegExp(`^\\/?${cmdName}\\s*`, 'i'), '');
 
     if (message.hasReplyMessage) {
         targetId = message.replyMessage.senderId;
     } else {
+        // 1. [id123|Name]
         const idMatch = reason.match(/\[id(\d+)\|[^\]]+\]/i);
         if (idMatch) {
             targetId = parseInt(idMatch[1]);
             reason = reason.replace(idMatch[0], ''); 
         } else {
+            // 2. @id123
             const atIdMatch = reason.match(/@id(\d+)/i);
             if (atIdMatch) {
                 targetId = parseInt(atIdMatch[1]);
                 reason = reason.replace(atIdMatch[0], ''); 
             } else {
-                const mentionMatch = reason.match(/@([a-zA-Z0-9._]+)/);
-                if (mentionMatch) {
+                // 3. Ссылка (vk.com/username или vk.ru/username)
+                const urlMatch = reason.match(/(?:https?:\/\/)?(?:vk\.com|vk\.ru)\/([a-zA-Z0-9._]+)/i);
+                if (urlMatch) {
                     try {
-                        const res = await vk.api.utils.resolveScreenName({ screen_name: mentionMatch[1] });
-                        if (res.type === 'user') targetId = res.object_id;
+                        const res = await vk.api.utils.resolveScreenName({ screen_name: urlMatch[1] });
+                        if (res.type === 'user' || res.type === 'group') targetId = res.object_id;
                     } catch (e) {}
-                    reason = reason.replace(mentionMatch[0], ''); 
+                    reason = reason.replace(urlMatch[0], ''); 
+                } else {
+                    // 4. @username
+                    const mentionMatch = reason.match(/@([a-zA-Z0-9._]+)/i);
+                    if (mentionMatch) {
+                        try {
+                            const res = await vk.api.utils.resolveScreenName({ screen_name: mentionMatch[1] });
+                            if (res.type === 'user') targetId = res.object_id;
+                        } catch (e) {}
+                        reason = reason.replace(mentionMatch[0], ''); 
+                    }
                 }
             }
         }
@@ -282,7 +296,6 @@ vk.updates.on('chat_invite_user', async (context) => {
 
 // ===== НОВЫЙ ОБРАБОТЧИК: КОММЕНТАРИИ (wall_reply_new) =====
 vk.updates.on('wall_reply_new', async (context) => {
-    // В vk-io данные комментария лежат в context.object
     const comment = context.object;
     
     console.log(`[КОММЕНТАРИИ] Получен комментарий от ID: ${comment.from_id} под постом ID: ${comment.post_id}`);
@@ -775,7 +788,7 @@ vk.updates.on('message_new', async (message) => {
 
                 const { targetId, reason } = await getTargetAndReason(message, 'kick');
 
-                if (!targetId) return await message.reply("⚠️ Указанный пользователь не является участником данной беседы, либо же имеет статус выше Вашего.", replyParams());
+                if (!targetId) return await message.reply("⚠️ Пользователь не найден. Проверьте ссылку или упоминание.", replyParams());
                 if (targetId === ADMIN_ID) return await message.reply("❌ Вы не можете исключить самого себя.", replyParams());
                 if (!message.isChat) return await message.reply("❌ Эту команду можно использовать только в беседе.", replyParams());
 
@@ -798,7 +811,7 @@ vk.updates.on('message_new', async (message) => {
 
                 const { targetId, reason } = await getTargetAndReason(message, 'чсб');
 
-                if (!targetId) return await message.reply("⚠️ Указанный пользователь не является участником данной беседы, либо же имеет статус выше Вашего.", replyParams());
+                if (!targetId) return await message.reply("⚠️ Пользователь не найден. Проверьте ссылку или упоминание.", replyParams());
                 if (targetId === ADMIN_ID) return await message.reply("❌ Вы не можете занести себя в ЧС.", replyParams());
                 
                 await dbRun("REPLACE INTO blacklist (user_id, reason) VALUES (?, ?)", [String(targetId), reason]);
@@ -810,7 +823,7 @@ vk.updates.on('message_new', async (message) => {
 
             if (cleanText.startsWith('разчсб')) {
                 const { targetId } = await getTargetAndReason(message, 'разчсб');
-                if (!targetId) return await message.reply("⚠️ Указанный пользователь не является участником данной беседы, либо же имеет статус выше Вашего.", replyParams());
+                if (!targetId) return await message.reply("⚠️ Пользователь не найден. Проверьте ссылку или упоминание.", replyParams());
 
                 await dbRun("DELETE FROM blacklist WHERE user_id = ?", [String(targetId)]);
                 const targetName = await getFullName(targetId);
