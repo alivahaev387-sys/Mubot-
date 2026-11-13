@@ -15,7 +15,7 @@ const BONUS_CD = 600;
 const FORTUNA_CD = 600;
 
 // Настройки награды за комментарии
-const REWARD_POST_ID = 3; // ID твоего поста из ссылки
+const REWARD_POST_ID = 3; // ID твоего поста
 const REWARD_AMOUNT = 2000000;
 
 const vk = new VK({ 
@@ -58,11 +58,8 @@ async function initDB() {
     await dbRun("CREATE TABLE IF NOT EXISTS businesses (user_id TEXT PRIMARY KEY, biz_name TEXT, level INTEGER DEFAULT 1, balance INTEGER DEFAULT 0, last_income INTEGER, last_withdraw INTEGER DEFAULT 0)");
     await dbRun("CREATE TABLE IF NOT EXISTS rep_limits (user_id TEXT PRIMARY KEY, count INTEGER DEFAULT 0, last_reset INTEGER)");
     await dbRun("CREATE TABLE IF NOT EXISTS work_cd (user_id TEXT PRIMARY KEY, count INTEGER DEFAULT 0, last_reset INTEGER)");
-    
-    // Таблица для наград за комментарии
     await dbRun("CREATE TABLE IF NOT EXISTS comment_rewards (user_id TEXT PRIMARY KEY, post_id TEXT)");
 
-    // Миграции
     try { await dbRun("ALTER TABLE users ADD COLUMN reputation INTEGER DEFAULT 0"); } catch(e) {}
     try { await dbRun("ALTER TABLE users ADD COLUMN xp INTEGER DEFAULT 0"); } catch(e) {}
     try { await dbRun("ALTER TABLE users ADD COLUMN level INTEGER DEFAULT 1"); } catch(e) {}
@@ -201,14 +198,6 @@ const getCloseReportKb = () => Keyboard.builder().inline()
     .callbackButton({ label: '❌ Закрыть репорт', payload: { cmd: 'close_report' }, color: Keyboard.SECONDARY_COLOR })
     .toString();
 
-const getHelpKb = () => Keyboard.builder().inline()
-    .callbackButton({ label: '🎮 Игры', payload: { cmd: 'help_cat', cat: 'games' }, color: Keyboard.PRIMARY_COLOR })
-    .callbackButton({ label: '💰 Экономика', payload: { cmd: 'help_cat', cat: 'eco' }, color: Keyboard.PRIMARY_COLOR })
-    .row()
-    .callbackButton({ label: '👤 Профиль', payload: { cmd: 'help_cat', cat: 'profile' }, color: Keyboard.SECONDARY_COLOR })
-    .callbackButton({ label: '🛡️ Репорт', payload: { cmd: 'help_cat', cat: 'report' }, color: Keyboard.SECONDARY_COLOR })
-    .toString();
-
 const getDuelKb = (duelId) => Keyboard.builder().inline().callbackButton({
     label: '⚔️ Сразиться',
     payload: { cmd: 'duel_accept', duel_id: duelId },
@@ -293,33 +282,26 @@ vk.updates.on('chat_invite_user', async (context) => {
 
 // ===== НОВЫЙ ОБРАБОТЧИК: КОММЕНТАРИИ (wall_reply_new) =====
 vk.updates.on('wall_reply_new', async (context) => {
-    // Проверяем, что комментарий под нужным постом (ID 3)
-    if (context.postId !== REWARD_POST_ID) return;
+    console.log(`[КОММЕНТАРИИ] Получен комментарий от ID: ${context.fromId} под постом ID: ${context.postId}`);
     
-    // Проверяем, что комментирует пользователь (не группа)
+    if (Number(context.postId) !== Number(REWARD_POST_ID)) return;
     if (context.fromId < 0) return;
-    
-    // Проверяем, не бот ли это (чтобы не наградить самого себя)
     if (context.fromId === -GROUP_ID || context.fromId === GROUP_ID) return;
 
     const userId = context.fromId;
 
     try {
-        // Проверка на ЧС
         const isBlacklisted = await dbGet("SELECT reason FROM blacklist WHERE user_id = ?", [String(userId)]);
         if (isBlacklisted) return;
 
-        // Проверяем, получал ли уже награду за комментарий
         const alreadyRewarded = await dbGet("SELECT user_id FROM comment_rewards WHERE user_id = ?", [String(userId)]);
-        if (alreadyRewarded) return; // Игнорируем, если уже получал
+        if (alreadyRewarded) return;
 
-        // Выдаем награду
         await updateBalance(userId, REWARD_AMOUNT);
         await dbRun("INSERT INTO comment_rewards (user_id, post_id) VALUES (?, ?)", [String(userId), String(context.postId)]);
 
         const name = await getFullName(userId);
         
-        // Отправляем ответный комментарий от лица группы
         await vk.api.wall.createComment({
             owner_id: context.ownerId,
             post_id: context.postId,
@@ -328,7 +310,7 @@ vk.updates.on('wall_reply_new', async (context) => {
             message: `💸 ${name}, вы получили ${formatMoney(REWARD_AMOUNT)}$ за комментарий! 🎉`
         });
         
-        console.log(`[КОММЕНТАРИИ] Выдана награда пользователю ${userId}`);
+        console.log(`[КОММЕНТАРИИ] Успешно выдана награда пользователю ${userId}`);
     } catch (e) {
         console.error("Ошибка при выдаче награды за комментарий:", e);
     }
@@ -346,6 +328,9 @@ vk.updates.on('message_new', async (message) => {
         const userId = message.senderId;
         const peerId = message.peerId;
         const isLs = peerId === userId;
+
+        const isMainButton = text.includes('работа') || text.includes('рулетка') || text.includes('профиль') || text.includes('топ');
+        if (!text.startsWith('/') && !isMainButton) return;
 
         // --- СИСТЕМА СОСТОЯНИЙ (ДЛЯ РЕПОРТОВ) ---
         const state = tempStates.get(userId);
@@ -399,14 +384,13 @@ vk.updates.on('message_new', async (message) => {
             }
         }
 
-        if (text.startsWith('/')) {
+        // --- ИСПРАВЛЕНИЕ БАГА С ЧС (Владелец не блокируется) ---
+        if (text.startsWith('/') && userId !== ADMIN_ID) {
             const isBlacklisted = await dbGet("SELECT reason FROM blacklist WHERE user_id = ?", [String(userId)]);
             if (isBlacklisted) {
                 return await message.reply(`🚫 Доступ запрещен!\n\n👤 Ваш ID: ${userId}\n📝 Вы в черном списке бота.\n📌 Причина: ${isBlacklisted.reason}`, { disable_mentions: 1 });
             }
         }
-
-        if (!text.startsWith('/') && text !== '💼 работа') return;
 
         const cleanText = text.replace(/\//g, '').trim();
         const parts = cleanText.split(/\s+/);
@@ -438,15 +422,31 @@ vk.updates.on('message_new', async (message) => {
             }
         }
 
+        // --- СТАРЫЙ HELP ---
         if (text.includes('help') || text.includes('помощь') || text.includes('команды')) {
-            return await message.reply("📖 **Главное меню помощи**\nВыберите нужную категорию ниже 👇", replyParams(getHelpKb()));
+            const helpText = "📖 Команды:\n🎰 /рулетка [цвет/чет] [ставка]\n🎲 /фортуна (100$)\n💣 /мины [ставка]\n⚔️ /duel [сумма]\n💸 /transfer [сумма] (ответом)\n🎁 /бонус\n🎁 /promo [код]\n📜 /промолист\n👤 /профиль\n🏆 /топ\n🏢 /бизнес\n🛒 /купитьбиз [название]\n💼 /мойбизнес\n💸 /вывести\n💀 /закрыть бизнес\n👍 /rep +/- изменения репутации (3 раза в сутки)\n🛡️ /report [текст] - Связь с админом";
+            return await message.reply(helpText, replyParams(isLs ? mainKb : undefined));
         }
 
-        if (cleanText === 'report' || cleanText === 'репорт') {
-            return await message.reply("🛡️ Связь с администрацией\nНажмите кнопку ниже, чтобы связаться с нами.", replyParams(getReportKb()));
+        // --- НОВЫЙ REPORT ---
+        if (cleanText.startsWith('report') || cleanText.startsWith('репорт')) {
+            const reportText = message.text.replace(/^\/?(report|репорт)\s*/i, '').trim();
+            
+            if (!reportText) {
+                return await message.reply("Формат: /report [текст]\nИли нажмите кнопку ниже, чтобы связаться с администрацией.", replyParams(getReportKb()));
+            }
+
+            // Если есть текст, сразу отправляем
+            await vk.api.messages.send({
+                peer_id: ADMIN_ID,
+                message: `🚨 Новый репорт от ${await getFullName(userId)}!\n\n📝 Текст: ${reportText}`,
+                keyboard: getAdminReportKb(userId),
+                random_id: Math.floor(Math.random() * 1000000000)
+            });
+            return await message.reply("✅ Ваше сообщение отправлено администрации. Ожидайте ответа.", replyParams(getCloseReportKb()));
         }
 
-        if (cleanText === 'профиль' || cleanText === 'баланс') {
+        if (cleanText.includes('профиль') || cleanText.includes('баланс')) {
             const uInfo = await dbGet("SELECT xp, level, reg_date FROM users WHERE user_id = ?", [String(userId)]);
             const lvl = uInfo.level || 1;
             const xp = uInfo.xp || 0;
@@ -456,7 +456,7 @@ vk.updates.on('message_new', async (message) => {
             return await message.reply(`🏠 Профиль ${await getFullName(userId)}\n\n💵 Баланс: ${formatMoney(balance)}$\n⭐ Репутация: ${rep}\n📊 Уровень: ${lvl} (${xp}/${needXp} XP)\n📅 Дата регистрации: ${date}\n🆔 ID: ${userId}`, replyParams(isLs ? mainKb : undefined));
         }
 
-        if (cleanText === 'топ' || cleanText === 'top') {
+        if (cleanText.includes('топ') || cleanText === 'top') {
             const rows = await dbAll("SELECT user_id, count FROM chat_messages WHERE peer_id = ? ORDER BY count DESC LIMIT 10", [String(peerId)]);
             let topText = "⭐ ТОП 10 ПОЛЬЗОВАТЕЛЕЙ ПО СООБЩЕНИЯМ\n\n";
             
@@ -632,11 +632,11 @@ vk.updates.on('message_new', async (message) => {
             }
         }
 
-        if (text === '💼 работа') {
+        if (text.includes('работа')) {
             return await message.reply("💼 Выберите работу:", replyParams(getWorkKb()));
         }
 
-        if (cleanText.startsWith('рулетка') || cleanText.startsWith('рул')) {
+        if (cleanText.includes('рулетка') || cleanText.startsWith('рул')) {
             if (parts.length >= 3) {
                 const choice = parts[1];
                 const betStr = parts[parts.length - 1];
@@ -908,7 +908,6 @@ vk.updates.on('message_event', async (context) => {
         const payload = context.eventPayload;
         const userId = context.userId;
         
-        // --- КНОПКИ РАБОТЫ (С КД И ШАНСОМ) ---
         if (payload.cmd === 'work_menu') {
             await context.editMessage({ message: "💼 Выберите работу:", keyboard: getWorkKb() });
             return;
@@ -924,7 +923,6 @@ vk.updates.on('message_event', async (context) => {
                 lastReset = Number(workRow.last_reset);
             }
 
-            // КД 1 час (3600000 мс) на восстановление 3 попыток
             if (now - lastReset >= 3600000) {
                 count = 0;
                 lastReset = now;
@@ -937,11 +935,9 @@ vk.updates.on('message_event', async (context) => {
                 return await context.answer({ type: 'show_snackbar', text: `⏳ Вы отработали 3 раза. Ждите ${m} мин. ${s} сек.` });
             }
 
-            // Тратим попытку
             count++;
             await dbRun("REPLACE INTO work_cd (user_id, count, last_reset) VALUES (?, ?, ?)", [String(userId), count, lastReset]);
 
-            // Шанс на неудачу 30%
             const isLucky = Math.random() > 0.3;
             let earned = 0;
             let msgText = "";
@@ -963,7 +959,6 @@ vk.updates.on('message_event', async (context) => {
             return await context.answer({ type: 'show_snackbar', text: isLucky ? '✅ Удача!' : '😢 Не повезло...' });
         }
 
-        // --- КНОПКИ РЕПОРТА ---
         if (payload.cmd === 'report_contact') {
             tempStates.set(userId, 'waiting_report');
             await context.editMessage({ message: "📝 Напишите вашу проблему следующим сообщением, и она будет передана администрации.", keyboard: "" });
@@ -988,23 +983,6 @@ vk.updates.on('message_event', async (context) => {
             return;
         }
 
-        // --- КНОПКИ ПОМОЩИ ---
-        if (payload.cmd === 'help_cat') {
-            let text = "";
-            if (payload.cat === 'games') {
-                text = "🎮 **Игровые команды:**\n\n🎰 /рулетка [цвет/чет] [ставка]\n🎲 /фортуна (100$)\n💣 /мины [ставка]\n⚔️ /duel [сумма]";
-            } else if (payload.cat === 'eco') {
-                text = "💰 **Экономика:**\n\n💼 Кнопка «Работа»\n🎁 /бонус\n🎁 /promo [код]\n💸 /transfer [сумма] (ответом)\n🏢 /бизнес (и покупка)";
-            } else if (payload.cat === 'profile') {
-                text = "👤 **Профиль и Топы:**\n\n👤 /профиль\n🏆 /топ\n👍 /rep +/- (3 раза в сутки)";
-            } else if (payload.cat === 'report') {
-                text = "🛡️ **Репорт:**\n\n📝 /report — Связаться с администрацией.\nОпишите проблему, и вам ответят в ближайшее время.";
-            }
-            await context.editMessage({ message: text, keyboard: getHelpKb() });
-            return;
-        }
-
-        // --- АКТИВАЦИЯ БОТА ---
         if (payload.cmd === 'activate_bot' || payload.cmd === 'decline_bot') {
             try {
                 const members = await vk.api.messages.getConversationMembers({ peer_id: context.peerId });
@@ -1032,7 +1010,6 @@ vk.updates.on('message_event', async (context) => {
             }
         }
 
-        // ===== КНОПКИ БИЗНЕСА =====
         if (payload.cmd === 'biz_upgrade') {
             if (String(context.userId) !== String(payload.author)) return await context.answer({ type: 'show_snackbar', text: '❌ Это не ваш бизнес!' });
             
@@ -1061,7 +1038,6 @@ vk.updates.on('message_event', async (context) => {
             return;
         }
 
-        // ===== КНОПКИ ТОПОВ =====
         if (payload.cmd === 'top_menu') {
             if (String(context.userId) !== String(payload.author)) {
                 return await context.answer({ type: 'show_snackbar', text: '❌ Это меню вызвано другим пользователем.' });
@@ -1181,7 +1157,6 @@ vk.updates.on('message_event', async (context) => {
             return;
         }
 
-        // ===== ИГРЫ (КНОПКИ) =====
         if (payload.cmd === 'duel_accept') {
             const duelId = payload.duel_id;
             const row = await dbGet("SELECT challenger, bet FROM active_duels WHERE msg_id = ?", [duelId]);
