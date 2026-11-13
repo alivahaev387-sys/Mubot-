@@ -1,9 +1,0 @@
-{
-  "name": "vk-game-bot",
-  "version": "1.0.0",
-  "main": "index.js",
-  "dependencies": {
-    "vk-io": "4.9.0",
-    "sqlite3": "^5.1.7"
-  }
-}
