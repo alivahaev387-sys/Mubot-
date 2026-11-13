@@ -215,8 +215,22 @@ vk.updates.on('message_new', async (message) => {
             } catch (e) { return await message.reply("⚠️ Ошибка проверки прав.", replyParams()); }
         }
 
+        // ОБНОВЛЕННЫЙ /HELP
         if (text.includes('help') || text.includes('помощь') || text.includes('команды')) {
-            const helpText = "📖 Команды:\n🎰 /рулетка [цвет/чет] [ставка]\n🎲 /фортуна (100$)\n💣 /мины [ставка]\n⚔️ /duel [сумма]\n💸 /transfer [сумма] (ответом)\n🎁 /бонус\n🎁 /promo [код]\n📜 /промолист\n🕵️ /мафия (Игра)\n📊 /rep +/- (Репутация)\n🏢 /бизнес\n👤 /профиль\n🏆 /топ";
+            const helpText = "📖 Доступные команды:\n\n" +
+                "🎰 /рулетка [цвет/чет] [ставка]\n" +
+                "🎲 /фортуна (100$)\n" +
+                "💣 /мины [ставка]\n" +
+                "⚔️ /duel [сумма]\n" +
+                "💸 /transfer [сумма] (ответом)\n" +
+                "🎁 /бонус\n" +
+                "🎁 /promo [код]\n" +
+                "📜 /промолист\n" +
+                "🕵️ /мафия (Игра в беседе)\n" +
+                "📊 /rep + / (Репутация)\n" +
+                "🏢 /бизнес\n" +
+                "👤 /профиль\n" +
+                "🏆 /топ";
             return await message.reply(helpText, replyParams(isLs ? mainKb : undefined));
         }
 
@@ -293,7 +307,6 @@ vk.updates.on('message_new', async (message) => {
                     random_id: Math.floor(Math.random() * 1000000)
                 });
             } catch (e) {
-                // Если ВК выдал ошибку из-за картинок, отправляем текстом
                 let bizList = "🏪 Доступные бизнесы:\n\n";
                 const kb = Keyboard.builder().inline();
                 BIZNESSES.forEach(b => {
@@ -320,7 +333,7 @@ vk.updates.on('message_new', async (message) => {
             return await message.reply(`🏢 Бизнес: ${config.name}\n💪 Уровень: ${userBiz.level}/5\n😼 ${formatMoney(currentIncome)}$/час\n\nНажмите на кнопку:`, replyParams(kb.toString()));
         }
 
-        // --- ОСТАЛЬНЫЕ ИГРЫ (РУЛЕТКА, ФОРТУНА, МИНЫ, ДУЭЛИ, ПРОМО) ---
+        // --- ОСТАЛЬНЫЕ ИГРЫ ---
         if (cleanText.startsWith('рулетка') || cleanText.startsWith('рул')) {
             if (parts.length >= 3) {
                 const choice = parts[1];
@@ -447,7 +460,6 @@ vk.updates.on('message_event', async (context) => {
     try {
         const payload = context.eventPayload;
         const userId = context.userId;
-        const chatId = context.peerId;
         
         // --- БИЗНЕСЫ ---
         if (payload.cmd && payload.cmd.startsWith('buy_biz_')) {
@@ -506,8 +518,6 @@ vk.updates.on('message_event', async (context) => {
                 }
             }
             if (payload.cmd === 'mafia_start') {
-                const host = await getFullName(userId); // Simplified check
-                // В реальном коде проверяем, что userId == hostId
                 return await context.answer({ type: 'show_snackbar', text: '🚀 Игра началась! Роли отправлены в ЛС.' });
             }
             if (payload.cmd === 'mafia_cancel') {
