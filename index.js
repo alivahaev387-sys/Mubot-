@@ -168,10 +168,10 @@ const getTopCoinsKb = () => Keyboard.builder().inline().callbackButton({
 }).toString();
 
 // ===== ОБРАБОТКА СООБЩЕНИЙ =====
-vk.updates.on('message_new', async (message) => {
+// ВАЖНО: Используем 'message', чтобы ловить системные события (out: 1)
+vk.updates.on('message', async (message) => {
     try {
         // ===== ПЕРВЫМ ДЕЛОМ ЛОВИМ ДОБАВЛЕНИЕ В БЕСЕДУ =====
-        // (ставим это ДО проверки isOutbox, так как ВК помечает действие как out: 1)
         if (message.action) {
             const action = message.action;
             
@@ -182,18 +182,20 @@ vk.updates.on('message_new', async (message) => {
                         .callbackButton({ label: 'Не активировать', payload: { cmd: 'decline_bot' }, color: Keyboard.NEGATIVE_COLOR });
                     
                     try {
+                        console.log(`[ПРИВЕТСТВИЕ] Попытка отправки в ${message.peerId}...`);
                         await vk.api.messages.send({
                             peer_id: message.peerId,
                             message: "📢 В данной беседе уже имеются сохранённые настройки, вы хотите чтобы я активировал их?",
                             keyboard: actKb.toString(),
                             random_id: Math.floor(Math.random() * 1000000000),
+                            group_id: GROUP_ID, // Жестко указываем ID группы
                             disable_mentions: 1
                         });
-                        console.log(`[ПРИВЕТСТВИЕ] Успешно отправлено в ${message.peerId}`);
+                        console.log(`[ПРИВЕТСТВИЕ] Успешно отправлено!`);
                     } catch (err) {
                         console.error(`[ОШИБКА ПРИВЕТСТВИЯ]`, err);
                     }
-                    return; // Выходим, дальше обрабатывать не нужно
+                    return; 
                 }
             }
         }
