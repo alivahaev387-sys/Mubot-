@@ -50,6 +50,9 @@ async function initDB() {
     await dbRun("CREATE TABLE IF NOT EXISTS chat_messages (peer_id TEXT, user_id TEXT, count INTEGER DEFAULT 0, PRIMARY KEY (peer_id, user_id))");
     await dbRun("CREATE TABLE IF NOT EXISTS businesses (user_id TEXT PRIMARY KEY, biz_name TEXT, level INTEGER DEFAULT 1, balance INTEGER DEFAULT 0, last_income INTEGER)");
     
+    // Таблица для КД репутации
+    await dbRun("CREATE TABLE IF NOT EXISTS rep_limits (user_id TEXT PRIMARY KEY, count INTEGER DEFAULT 0, last_reset INTEGER)");
+
     // Миграции для старых баз
     try { await dbRun("ALTER TABLE users ADD COLUMN reputation INTEGER DEFAULT 0"); } catch(e) {}
     try { await dbRun("ALTER TABLE users ADD COLUMN xp INTEGER DEFAULT 0"); } catch(e) {}
@@ -198,43 +201,37 @@ const getMinesFieldKb = (gameId, opened, mines, isGameOver = false) => {
     return kb.toString();
 };
 
-// Клавиатура для Топов
 const getTopKb = (authorId, type = 'coins', scope = 'chat', repType = 'pos') => {
     const kb = Keyboard.builder().inline();
     
-    // Ряд 1: Категории
     kb.callbackButton({ label: '💰 Моне...', payload: { cmd: 'top_menu', type: 'coins', scope, repType, author: authorId }, color: type === 'coins' ? Keyboard.PRIMARY_COLOR : Keyboard.SECONDARY_COLOR });
     kb.callbackButton({ label: '📊 Уров...', payload: { cmd: 'top_menu', type: 'level', scope, repType, author: authorId }, color: type === 'level' ? Keyboard.PRIMARY_COLOR : Keyboard.SECONDARY_COLOR });
     kb.callbackButton({ label: '⭐ Репу...', payload: { cmd: 'top_menu', type: 'rep', scope, repType, author: authorId }, color: type === 'rep' ? Keyboard.PRIMARY_COLOR : Keyboard.SECONDARY_COLOR });
     kb.row();
 
-    // Ряд 2: Дуэли и Бонусы
     kb.callbackButton({ label: '⚔️ Дуэли', payload: { cmd: 'top_menu', type: 'duels', scope, repType, author: authorId }, color: type === 'duels' ? Keyboard.PRIMARY_COLOR : Keyboard.SECONDARY_COLOR });
     kb.callbackButton({ label: '🎁 Бонус', payload: { cmd: 'top_menu', type: 'bonus', scope, repType, author: authorId }, color: type === 'bonus' ? Keyboard.PRIMARY_COLOR : Keyboard.SECONDARY_COLOR });
     kb.row();
     
-    // Ряд 3: Если выбрана репутация, добавляем выбор плюса/минуса
     if (type === 'rep') {
         kb.callbackButton({ label: '➕ Положит.', payload: { cmd: 'top_menu', type: 'rep', scope, repType: 'pos', author: authorId }, color: repType === 'pos' ? Keyboard.POSITIVE_COLOR : Keyboard.SECONDARY_COLOR });
         kb.callbackButton({ label: '➖ Отрицат.', payload: { cmd: 'top_menu', type: 'rep', scope, repType: 'neg', author: authorId }, color: repType === 'neg' ? Keyboard.NEGATIVE_COLOR : Keyboard.SECONDARY_COLOR });
         kb.row();
     }
 
-    // Ряд 4: Область (Общее / В беседе)
     kb.callbackButton({ label: '🌍 Общее', payload: { cmd: 'top_menu', type, scope: 'global', repType, author: authorId }, color: scope === 'global' ? Keyboard.PRIMARY_COLOR : Keyboard.SECONDARY_COLOR });
     kb.callbackButton({ label: '💬 В беседе', payload: { cmd: 'top_menu', type, scope: 'chat', repType, author: authorId }, color: scope === 'chat' ? Keyboard.PRIMARY_COLOR : Keyboard.SECONDARY_COLOR });
     kb.row();
     
-    // Ряд 5: Кнопка Назад
     kb.callbackButton({ label: '🔙 Назад', payload: { cmd: 'top_back', author: authorId }, color: Keyboard.SECONDARY_COLOR });
 
     return kb.toString();
 };
 
 const getBizKb = (authorId) => Keyboard.builder().inline()
-    .callbackButton({ label: '💵 Вывести', payload: { cmd: 'biz_withdraw', author: authorId }, color: Keyboard.POSITIVE_COLOR })
+    .callbackButton({ label: 'Вывести $$$', payload: { cmd: 'biz_withdraw', author: authorId }, color: Keyboard.POSITIVE_COLOR })
     .row()
-    .callbackButton({ label: '📈 Повысить уровень', payload: { cmd: 'biz_upgrade', author: authorId }, color: Keyboard.PRIMARY_COLOR })
+    .callbackButton({ label: 'Повысить уровень', payload: { cmd: 'biz_upgrade', author: authorId }, color: Keyboard.SECONDARY_COLOR })
     .toString();
 
 // ===== ПРИВЕТСТВИЕ =====
@@ -270,7 +267,6 @@ vk.updates.on('message_new', async (message) => {
         const peerId = message.peerId;
         const isLs = peerId === userId;
 
-        // --- СИСТЕМА УРОВНЕЙ (XP) ---
         let userRow = await dbGet("SELECT xp, level, reg_date FROM users WHERE user_id = ?", [String(userId)]);
         if (!userRow) {
             const today = new Date().toLocaleDateString('ru-RU');
@@ -289,7 +285,6 @@ vk.updates.on('message_new', async (message) => {
             await dbRun("UPDATE users SET xp = ?, level = ? WHERE user_id = ?", [newXp, newLvl, String(userId)]);
         }
 
-        // Счетчик сообщений
         if (message.isChat) {
             const existing = await dbGet("SELECT count FROM chat_messages WHERE peer_id = ? AND user_id = ?", [String(peerId), String(userId)]);
             if (existing) {
@@ -299,7 +294,6 @@ vk.updates.on('message_new', async (message) => {
             }
         }
 
-        // Проверка на ЧС
         if (text.startsWith('/')) {
             const isBlacklisted = await dbGet("SELECT reason FROM blacklist WHERE user_id = ?", [String(userId)]);
             if (isBlacklisted) {
@@ -321,7 +315,6 @@ vk.updates.on('message_new', async (message) => {
             return p;
         };
 
-        // --- КОМАНДА START ---
         if (text.includes('начать') || text.includes('start')) {
             if (message.isChat) {
                 try {
@@ -340,13 +333,11 @@ vk.updates.on('message_new', async (message) => {
             }
         }
 
-        // --- HELP ---
         if (text.includes('help') || text.includes('помощь') || text.includes('команды')) {
-            const helpText = "📖 Команды:\n🎰 /рулетка [цвет/чет] [ставка]\n🎲 /фортуна (100$)\n💣 /мины [ставка]\n⚔️ /duel [сумма]\n💸 /transfer [сумма] (ответом)\n🎁 /бонус\n🎁 /promo [код]\n📜 /промолист\n👤 /профиль\n🏆 /топ\n🏢 /бизнес\n🛒 /купитьбиз [название]\n💼 /мойбизнес\n💀 /закрыть бизнес\n👍 /rep +/- изменения репутации";
+            const helpText = "📖 Команды:\n🎰 /рулетка [цвет/чет] [ставка]\n🎲 /фортуна (100$)\n💣 /мины [ставка]\n⚔️ /duel [сумма]\n💸 /transfer [сумма] (ответом)\n🎁 /бонус\n🎁 /promo [код]\n📜 /промолист\n👤 /профиль\n🏆 /топ\n🏢 /бизнес\n🛒 /купитьбиз [название]\n💼 /мойбизнес\n💀 /закрыть бизнес\n👍 /rep +/- изменения репутации (3 раза в сутки)";
             return await message.reply(helpText, replyParams(isLs ? mainKb : undefined));
         }
 
-        // --- ПРОФИЛЬ ---
         if (cleanText === 'профиль' || cleanText === 'баланс') {
             const uInfo = await dbGet("SELECT xp, level, reg_date FROM users WHERE user_id = ?", [String(userId)]);
             const lvl = uInfo.level || 1;
@@ -357,7 +348,6 @@ vk.updates.on('message_new', async (message) => {
             return await message.reply(`🏠 Профиль ${await getFullName(userId)}\n\n💵 Баланс: ${formatMoney(balance)}$\n⭐ Репутация: ${rep}\n📊 Уровень: ${lvl} (${xp}/${needXp} XP)\n📅 Дата регистрации: ${date}\n🆔 ID: ${userId}`, replyParams(isLs ? mainKb : undefined));
         }
 
-        // --- ТОП (Главное меню) ---
         if (cleanText === 'топ' || cleanText === 'top') {
             const rows = await dbAll("SELECT user_id, count FROM chat_messages WHERE peer_id = ? ORDER BY count DESC LIMIT 10", [String(peerId)]);
             let topText = "⭐ ТОП 10 ПОЛЬЗОВАТЕЛЕЙ ПО СООБЩЕНИЯМ\n\n";
@@ -425,12 +415,11 @@ vk.updates.on('message_new', async (message) => {
 
             const bizData = Object.values(BIZ_DATA).find(b => b.name === biz.biz_name) || { name: biz.biz_name, baseIncome: 1000 };
             const timePassed = Date.now() - biz.last_income;
-            const incomePerMs = (bizData.baseIncome * biz.level) / 180000;
-            const earned = Math.floor(timePassed * incomePerMs);
+            const earned = Math.floor(timePassed * ((bizData.baseIncome * biz.level) / 180000));
             const totalBalance = Number(biz.balance) + earned;
             const nextLevelCost = (Number(biz.level) === 1 ? 2000000 : Number(biz.level) === 2 ? 5000000 : Number(biz.level) * 5000000);
 
-            const msgText = `🏢 Бизнес ${await getFullName(userId)}\n${biz.biz_name}\n\n💪 Уровень: ${biz.level}/5\n📈 Доход: ${formatMoney(bizData.baseIncome * biz.level)}$/3мин\n💵 На балансе бизнеса: ${formatMoney(totalBalance)}$\n\nПовышение уровня стоит: ${formatMoney(nextLevelCost)}$`;
+            const msgText = `🏢 Бизнес ${await getFullName(userId)}\n${biz.biz_name}\n\n💪 Уровень: ${biz.level}/5\n🐱 ${formatMoney(bizData.baseIncome * biz.level * 20)}$/час\n💸 На балансе бизнеса: ${formatMoney(totalBalance)}$\n\nБизнес работает только 4 часа! Чтобы опять стал работать нужно вывести $$$`;
 
             return await message.reply(msgText, replyParams(getBizKb(userId)));
         }
@@ -444,9 +433,9 @@ vk.updates.on('message_new', async (message) => {
             return await message.reply("💀 Вы успешно закрыли свой бизнес и получили компенсацию в размере 10,000,000$ на баланс.", replyParams());
         }
 
-        // --- РЕПУТАЦИЯ ---
+        // --- РЕПУТАЦИЯ С КД ---
         if (text === '/rep' || text === 'реп') {
-            return await message.reply("🔔 Для изменения репутации используйте /rep + или /rep -, указав пользователя. Пример: /rep + @Mokhma.volk", replyParams());
+            return await message.reply("🔔 Для изменения репутации используйте /rep + или /rep -, указав пользователя. Пример: /rep + @Mokhma.volk\n(Доступно 3 изменения в сутки)", replyParams());
         }
 
         if (text.startsWith('/rep +') || text.startsWith('/rep -')) {
@@ -472,16 +461,44 @@ vk.updates.on('message_new', async (message) => {
             if (!targetId) return await message.reply("⚠️ Укажите пользователя через @упоминание или ответом на сообщение.", replyParams());
             if (targetId === userId) return await message.reply("❌ Вы не можете изменить репутацию самому себе!", replyParams());
 
+            // Проверка КД (3 раза в 24 часа)
+            const now = Date.now();
+            const repRow = await dbGet("SELECT count, last_reset FROM rep_limits WHERE user_id = ?", [String(userId)]);
+            let repCount = 0;
+            let repReset = 0;
+
+            if (repRow) {
+                repCount = Number(repRow.count);
+                repReset = Number(repRow.last_reset);
+            }
+
+            // Если прошло больше 24 часов, сбрасываем
+            if (now - repReset >= 86400000) {
+                repCount = 0;
+                repReset = now;
+            }
+
+            if (repCount >= 3) {
+                const remainingMs = 86400000 - (now - repReset);
+                const hours = Math.floor(remainingMs / 3600000);
+                const minutes = Math.floor((remainingMs % 3600000) / 60000);
+                const seconds = Math.floor((remainingMs % 60000) / 1000);
+                return await message.reply(`⏳ Вы исчерпали лимит на изменение репутации (3 раза в сутки).\nПопробуйте снова через ${hours} ч. ${minutes} мин. ${seconds} сек.`, replyParams());
+            }
+
+            // Обновляем КД
+            repCount++;
+            await dbRun("REPLACE INTO rep_limits (user_id, count, last_reset) VALUES (?, ?, ?)", [String(userId), repCount, repReset]);
+
             if (isPlus) {
                 await updateReputation(targetId, 1);
-                return await message.reply(`🟢 ${await getFullName(userId)} повысил репутацию пользователя ${await getFullName(targetId)} (Теперь у него ${await getReputation(targetId)})`, replyParams());
+                return await message.reply(`🟢 ${await getFullName(userId)} повысил репутацию пользователя ${await getFullName(targetId)} (Теперь у него ${await getReputation(targetId)}).\n📅 Осталось изменений: ${3 - repCount}/3`, replyParams());
             } else {
                 await updateReputation(targetId, -1);
-                return await message.reply(`🔴 ${await getFullName(userId)} понизил репутацию пользователя ${await getFullName(targetId)} (Теперь у него ${await getReputation(targetId)})`, replyParams());
+                return await message.reply(`🔴 ${await getFullName(userId)} понизил репутацию пользователя ${await getFullName(targetId)} (Теперь у него ${await getReputation(targetId)}).\n📅 Осталось изменений: ${3 - repCount}/3`, replyParams());
             }
         }
 
-        // --- ИГРЫ ---
         if (text === '💼 работа') {
             const earned = Math.floor(Math.random() * 400) + 100;
             await updateBalance(userId, earned);
@@ -801,23 +818,18 @@ vk.updates.on('message_event', async (context) => {
             const nextLevelCost = (Number(biz.level) === 1 ? 2000000 : Number(biz.level) === 2 ? 5000000 : Number(biz.level) * 5000000);
 
             if (payload.cmd === 'biz_withdraw') {
-                if (totalBalance <= 0) return await context.answer({ type: 'show_snackbar', text: '❌ Нечего выводить!' });
+                if (totalBalance <= 0) return await context.answer({ type: 'show_snackbar', text: '❌ у вас пустой баланс бизнеса' });
+                
                 await updateBalance(userId, totalBalance);
                 await dbRun("UPDATE businesses SET balance = 0, last_income = ? WHERE user_id = ?", [Date.now(), String(userId)]);
-                await context.answer({ type: 'show_snackbar', text: `✅ Выведено ${formatMoney(totalBalance)}$!` });
+                await context.answer({ type: 'show_snackbar', text: `💸 Вы вывели ${formatMoney(totalBalance)}$` });
                 
-                const newMsgText = `🏢 Бизнес ${await getFullName(userId)}\n${biz.biz_name}\n\n💪 Уровень: ${biz.level}/5\n📈 Доход: ${formatMoney(bizData.baseIncome * biz.level)}$/3мин\n💵 На балансе бизнеса: 0$\n\nПовышение уровня стоит: ${formatMoney(nextLevelCost)}$`;
+                const newMsgText = `🏢 Бизнес ${await getFullName(userId)}\n${biz.biz_name}\n\n💪 Уровень: ${biz.level}/5\n🐱 ${formatMoney(bizData.baseIncome * biz.level * 20)}$/час\n💸 На балансе бизнеса: 0$\n\nБизнес работает только 4 часа! Чтобы опять стал работать нужно вывести $$$`;
                 
                 try {
                     await context.editMessage({ message: newMsgText, keyboard: getBizKb(userId), disable_mentions: 1 });
                 } catch(e) {
-                    await vk.api.messages.send({
-                        peer_id: context.peerId,
-                        message: newMsgText,
-                        keyboard: getBizKb(userId),
-                        random_id: Math.floor(Math.random() * 1000000000),
-                        disable_mentions: 1
-                    });
+                    console.log("Не удалось отредактировать сообщение бизнеса (возможно, оно старое)");
                 }
                 return;
             }
@@ -831,18 +843,12 @@ vk.updates.on('message_event', async (context) => {
                 await dbRun("UPDATE businesses SET level = level + 1, balance = ?, last_income = ? WHERE user_id = ?", [totalBalance, Date.now(), String(userId)]);
                 await context.answer({ type: 'show_snackbar', text: `✅ Уровень повышен до ${biz.level + 1}!` });
                 
-                const newMsgText = `🏢 Бизнес ${await getFullName(userId)}\n${biz.biz_name}\n\n💪 Уровень: ${biz.level + 1}/5\n📈 Доход: ${formatMoney(bizData.baseIncome * (biz.level + 1))}$/3мин\n💵 На балансе бизнеса: ${formatMoney(totalBalance)}$\n\nПовышение уровня стоит: ${formatMoney((biz.level + 1) * 5000000)}$`;
+                const newMsgText = `🏢 Бизнес ${await getFullName(userId)}\n${biz.biz_name}\n\n💪 Уровень: ${biz.level + 1}/5\n🐱 ${formatMoney(bizData.baseIncome * (biz.level + 1) * 20)}$/час\n💸 На балансе бизнеса: ${formatMoney(totalBalance)}$\n\nБизнес работает только 4 часа! Чтобы опять стал работать нужно вывести $$$`;
                 
                 try {
                     await context.editMessage({ message: newMsgText, keyboard: getBizKb(userId), disable_mentions: 1 });
                 } catch(e) {
-                    await vk.api.messages.send({
-                        peer_id: context.peerId,
-                        message: newMsgText,
-                        keyboard: getBizKb(userId),
-                        random_id: Math.floor(Math.random() * 1000000000),
-                        disable_mentions: 1
-                    });
+                    console.log("Не удалось отредактировать сообщение бизнеса (возможно, оно старое)");
                 }
                 return;
             }
@@ -929,12 +935,11 @@ vk.updates.on('message_event', async (context) => {
                 conversation_message_id: context.conversationMessageId,
                 message: topText,
                 keyboard: getTopKb(payload.author, type, scope, repType),
-                disable_mentions: 1 // ИСПРАВЛЕНО: убирает теги при нажатии кнопок
+                disable_mentions: 1
             });
             return;
         }
 
-        // Кнопка "Назад" в топе
         if (payload.cmd === 'top_back') {
             if (String(context.userId) !== String(payload.author)) return await context.answer({ type: 'show_snackbar', text: '❌ Это меню вызвано другим пользователем.' });
             
@@ -964,7 +969,7 @@ vk.updates.on('message_event', async (context) => {
                 conversation_message_id: context.conversationMessageId,
                 message: topText,
                 keyboard: getTopKb(payload.author, 'coins', 'chat'),
-                disable_mentions: 1 // ИСПРАВЛЕНО: убирает теги при нажатии кнопок
+                disable_mentions: 1
             });
             return;
         }
@@ -1000,7 +1005,7 @@ vk.updates.on('message_event', async (context) => {
                     conversation_message_id: context.conversationMessageId,
                     message: msgText,
                     keyboard: "",
-                    disable_mentions: 1 // ИСПРАВЛЕНО: убирает теги
+                    disable_mentions: 1
                 });
                 return;
             }
