@@ -30,17 +30,17 @@ const dbRun = (query, params = []) => new Promise((res, rej) => db.run(query, pa
 const dbGet = (query, params = []) => new Promise((res, rej) => db.get(query, params, (e, r) => e ? rej(e) : res(r)));
 const dbAll = (query, params = []) => new Promise((res, rej) => db.all(query, params, (e, r) => e ? rej(e) : res(r)));
 
-// Данные бизнесов
+// Данные бизнесов (Новые доходы)
 const BIZ_DATA = {
-    'шаурма': { name: '🌯 Шаурма', price: 500000, baseIncome: 1000 },
-    'кафе': { name: '☕ Кафе', price: 1500000, baseIncome: 3000 },
-    'game zone': { name: '🕹️ Отдел Game Zone', price: 5000000, baseIncome: 10000 },
-    'казино': { name: '🎰 Казино', price: 15000000, baseIncome: 30000 },
-    'пятерочка': { name: '🏪 24/7 Пятёрочка', price: 50000000, baseIncome: 100000 }
+    'шаурма': { name: '🌯 Шаурма', price: 500000, baseIncome: 2000 },
+    'кафе': { name: '☕ Кафе', price: 1500000, baseIncome: 4000 },
+    'game zone': { name: '🕹️ Отдел Game Zone', price: 5000000, baseIncome: 6000 },
+    'казино': { name: '🎰 Казино', price: 15000000, baseIncome: 10000 },
+    'пятерочка': { name: '🏪 24/7 Пятёрочка', price: 50000000, baseIncome: 15000 }
 };
 
 async function initDB() {
-    await dbRun("CREATE TABLE IF NOT EXISTS users (user_id TEXT PRIMARY KEY, balance INTEGER DEFAULT 1000, reputation INTEGER DEFAULT 0, xp INTEGER DEFAULT 0, level INTEGER DEFAULT 1, reg_date TEXT)");
+    await dbRun("CREATE TABLE IF NOT EXISTS users (user_id TEXT PRIMARY KEY, balance INTEGER DEFAULT 1000, reputation INTEGER DEFAULT 0, xp INTEGER DEFAULT 0, level INTEGER DEFAULT 1, reg_date TEXT, duel_wins INTEGER DEFAULT 0, bonus_count INTEGER DEFAULT 0)");
     await dbRun("CREATE TABLE IF NOT EXISTS active_duels (msg_id TEXT PRIMARY KEY, challenger TEXT, bet INTEGER, peer_id TEXT)");
     await dbRun("CREATE TABLE IF NOT EXISTS bonus_cd (user_id TEXT PRIMARY KEY, last_used INTEGER)");
     await dbRun("CREATE TABLE IF NOT EXISTS fortune_cd (user_id TEXT PRIMARY KEY, last_used INTEGER)");
@@ -55,13 +55,14 @@ async function initDB() {
     try { await dbRun("ALTER TABLE users ADD COLUMN xp INTEGER DEFAULT 0"); } catch(e) {}
     try { await dbRun("ALTER TABLE users ADD COLUMN level INTEGER DEFAULT 1"); } catch(e) {}
     try { await dbRun("ALTER TABLE users ADD COLUMN reg_date TEXT"); } catch(e) {}
+    try { await dbRun("ALTER TABLE users ADD COLUMN duel_wins INTEGER DEFAULT 0"); } catch(e) {}
+    try { await dbRun("ALTER TABLE users ADD COLUMN bonus_count INTEGER DEFAULT 0"); } catch(e) {}
     
     console.log("--- БАЗА ДАННЫХ ГОТОВА ---");
 }
 initDB();
 
 // ===== ХЕЛПЕРЫ =====
-// Парсер денег (понимает 500кк, 10м, 1ккк и т.д.)
 function parseAmount(str) {
     if (!str) return 0;
     str = String(str).toLowerCase().replace(/\s/g, '');
@@ -84,7 +85,6 @@ async function getBalance(userId) {
         return 1000;
     }
     let bal = Number(row.balance);
-    // Защита от NaN и бесконечности (исправляет баг с -∞$)
     if (isNaN(bal) || !isFinite(bal)) {
         await dbRun("UPDATE users SET balance = 0 WHERE user_id = ?", [String(userId)]);
         return 0;
@@ -202,10 +202,15 @@ const getMinesFieldKb = (gameId, opened, mines, isGameOver = false) => {
 const getTopKb = (authorId, type = 'coins', scope = 'chat', repType = 'pos') => {
     const kb = Keyboard.builder().inline();
     
-    // Категории
-    kb.callbackButton({ label: '💰 Монеты', payload: { cmd: 'top_menu', type: 'coins', scope, repType, author: authorId }, color: type === 'coins' ? Keyboard.PRIMARY_COLOR : Keyboard.SECONDARY_COLOR });
-    kb.callbackButton({ label: '📊 Уровень', payload: { cmd: 'top_menu', type: 'level', scope, repType, author: authorId }, color: type === 'level' ? Keyboard.PRIMARY_COLOR : Keyboard.SECONDARY_COLOR });
-    kb.callbackButton({ label: '⭐ Репутация', payload: { cmd: 'top_menu', type: 'rep', scope, repType, author: authorId }, color: type === 'rep' ? Keyboard.PRIMARY_COLOR : Keyboard.SECONDARY_COLOR });
+    // Ряд 1: Категории
+    kb.callbackButton({ label: '💰 Моне...', payload: { cmd: 'top_menu', type: 'coins', scope, repType, author: authorId }, color: type === 'coins' ? Keyboard.PRIMARY_COLOR : Keyboard.SECONDARY_COLOR });
+    kb.callbackButton({ label: '📊 Уров...', payload: { cmd: 'top_menu', type: 'level', scope, repType, author: authorId }, color: type === 'level' ? Keyboard.PRIMARY_COLOR : Keyboard.SECONDARY_COLOR });
+    kb.callbackButton({ label: '⭐ Репу...', payload: { cmd: 'top_menu', type: 'rep', scope, repType, author: authorId }, color: type === 'rep' ? Keyboard.PRIMARY_COLOR : Keyboard.SECONDARY_COLOR });
+    kb.row();
+
+    // Ряд 2: Дуэли и Бонусы
+    kb.callbackButton({ label: '⚔️ Дуэли', payload: { cmd: 'top_menu', type: 'duels', scope, repType, author: authorId }, color: type === 'duels' ? Keyboard.PRIMARY_COLOR : Keyboard.SECONDARY_COLOR });
+    kb.callbackButton({ label: '🎁 Бонус', payload: { cmd: 'top_menu', type: 'bonus', scope, repType, author: authorId }, color: type === 'bonus' ? Keyboard.PRIMARY_COLOR : Keyboard.SECONDARY_COLOR });
     kb.row();
     
     // Если выбрана репутация, добавляем выбор плюса/минуса
@@ -275,7 +280,6 @@ vk.updates.on('message_new', async (message) => {
                 const today = new Date().toLocaleDateString('ru-RU');
                 await dbRun("UPDATE users SET reg_date = ? WHERE user_id = ?", [today, String(userId)]);
             }
-            // Выдаем 40 XP за сообщение
             let newXp = (Number(userRow.xp) || 0) + 40;
             let newLvl = Number(userRow.level) || 1;
             while (newXp >= newLvl * 500) {
@@ -604,6 +608,7 @@ vk.updates.on('message_new', async (message) => {
             const bonusAmount = [100000, 200000, 500000][Math.floor(Math.random() * 3)];
             await updateBalance(userId, bonusAmount);
             await dbRun("REPLACE INTO bonus_cd (user_id, last_used) VALUES (?, ?)", [String(userId), currentTime]);
+            await dbRun("UPDATE users SET bonus_count = bonus_count + 1 WHERE user_id = ?", [String(userId)]);
             
             return await message.reply(`🎁 Бонус получен! ✨\n+${formatMoney(bonusAmount)}$\n💰 Баланс: ${formatMoney(await getBalance(userId))}$`, replyParams(isLs ? mainKb : undefined));
         }
@@ -793,18 +798,21 @@ vk.updates.on('message_event', async (context) => {
             const timePassed = Date.now() - biz.last_income;
             const earned = Math.floor(timePassed * ((bizData.baseIncome * biz.level) / 180000));
             const totalBalance = Number(biz.balance) + earned;
+            const nextLevelCost = (Number(biz.level) === 1 ? 2000000 : Number(biz.level) === 2 ? 5000000 : Number(biz.level) * 5000000);
 
             if (payload.cmd === 'biz_withdraw') {
                 if (totalBalance <= 0) return await context.answer({ type: 'show_snackbar', text: '❌ Нечего выводить!' });
                 await updateBalance(userId, totalBalance);
                 await dbRun("UPDATE businesses SET balance = 0, last_income = ? WHERE user_id = ?", [Date.now(), String(userId)]);
                 await context.answer({ type: 'show_snackbar', text: `✅ Выведено ${formatMoney(totalBalance)}$!` });
-                await context.editMessage({ message: `🏢 Бизнес ${biz.biz_name}\n\n💵 Вы успешно вывели ${formatMoney(totalBalance)}$ на баланс!`, keyboard: getBizKb(userId) });
+                
+                // Перерисовываем сообщение, показывая 0 на балансе
+                const newMsgText = `🏢 Бизнес ${await getFullName(userId)}\n${biz.biz_name}\n\n💪 Уровень: ${biz.level}/5\n📈 Доход: ${formatMoney(bizData.baseIncome * biz.level)}$/3мин\n💵 На балансе бизнеса: 0$\n\nПовышение уровня стоит: ${formatMoney(nextLevelCost)}$`;
+                await context.editMessage({ message: newMsgText, keyboard: getBizKb(userId) });
                 return;
             }
 
             if (payload.cmd === 'biz_upgrade') {
-                const nextLevelCost = (biz.level === 1 ? 2000000 : biz.level === 2 ? 5000000 : biz.level * 5000000);
                 const userBal = await getBalance(userId);
                 if (biz.level >= 5) return await context.answer({ type: 'show_snackbar', text: '❌ Максимальный уровень!' });
                 if (userBal < nextLevelCost) return await context.answer({ type: 'show_snackbar', text: '❌ Не хватает денег на балансе!' });
@@ -813,8 +821,8 @@ vk.updates.on('message_event', async (context) => {
                 await dbRun("UPDATE businesses SET level = level + 1, balance = ?, last_income = ? WHERE user_id = ?", [totalBalance, Date.now(), String(userId)]);
                 await context.answer({ type: 'show_snackbar', text: `✅ Уровень повышен до ${biz.level + 1}!` });
                 
-                const newBizData = { name: biz.biz_name, baseIncome: bizData.baseIncome };
-                await context.editMessage({ message: `🏢 Бизнес ${biz.biz_name}\n\n💪 Новый уровень: ${biz.level + 1}\n📈 Доход: ${formatMoney(newBizData.baseIncome * (biz.level + 1))}$/3мин`, keyboard: getBizKb(userId) });
+                const newMsgText = `🏢 Бизнес ${await getFullName(userId)}\n${biz.biz_name}\n\n💪 Уровень: ${biz.level + 1}/5\n📈 Доход: ${formatMoney(bizData.baseIncome * (biz.level + 1))}$/3мин\n💵 На балансе бизнеса: ${formatMoney(totalBalance)}$\n\nПовышение уровня стоит: ${formatMoney((biz.level + 1) * 5000000)}$`;
+                await context.editMessage({ message: newMsgText, keyboard: getBizKb(userId) });
                 return;
             }
         }
@@ -832,23 +840,34 @@ vk.updates.on('message_event', async (context) => {
             let orderBy = "balance DESC";
             let filter = "balance > 2";
             
+            // Строгое разделение репутации (исправлен баг)
             if (type === 'rep') {
-                orderBy = repType === 'pos' ? "reputation DESC" : "reputation ASC";
-                filter = "reputation != 0";
+                if (repType === 'pos') {
+                    orderBy = "reputation DESC";
+                    filter = "reputation > 0";
+                } else {
+                    orderBy = "reputation ASC";
+                    filter = "reputation < 0";
+                }
             } else if (type === 'level') {
                 orderBy = "level DESC, xp DESC";
                 filter = "level > 1"; 
+            } else if (type === 'duels') {
+                orderBy = "duel_wins DESC";
+                filter = "duel_wins > 0";
+            } else if (type === 'bonus') {
+                orderBy = "bonus_count DESC";
+                filter = "bonus_count > 0";
             }
 
             let rows = [];
             if (scope === 'global') {
-                rows = await dbAll(`SELECT user_id, balance, reputation, level, xp FROM users WHERE ${filter} ORDER BY ${orderBy} LIMIT 10`);
+                rows = await dbAll(`SELECT user_id, balance, reputation, level, xp, duel_wins, bonus_count FROM users WHERE ${filter} ORDER BY ${orderBy} LIMIT 10`);
             } else {
-                // Топ в беседе
                 const chatUsers = await dbAll("SELECT user_id FROM chat_messages WHERE peer_id = ?", [String(context.peerId)]);
                 if (chatUsers.length > 0) {
                     const ids = chatUsers.map(u => `'${u.user_id}'`).join(',');
-                    rows = await dbAll(`SELECT user_id, balance, reputation, level, xp FROM users WHERE user_id IN (${ids}) AND ${filter} ORDER BY ${orderBy} LIMIT 10`);
+                    rows = await dbAll(`SELECT user_id, balance, reputation, level, xp, duel_wins, bonus_count FROM users WHERE user_id IN (${ids}) AND ${filter} ORDER BY ${orderBy} LIMIT 10`);
                 }
             }
 
@@ -861,6 +880,8 @@ vk.updates.on('message_event', async (context) => {
             let title = `🏆 ТОП 10 (${scope === 'global' ? 'Общий' : 'В беседе'})\n`;
             if (type === 'coins') title += "💰 По монетам\n\n";
             if (type === 'level') title += "📊 По уровню\n\n";
+            if (type === 'duels') title += "⚔️ По победам в дуэлях\n\n";
+            if (type === 'bonus') title += "🎁 По бонусам\n\n";
             if (type === 'rep') title += `⭐ По репутации (${repType === 'pos' ? 'Положительная' : 'Отрицательная'})\n\n`;
 
             let topText = title;
@@ -874,6 +895,8 @@ vk.updates.on('message_event', async (context) => {
                     if (type === 'coins') value = `${formatMoney(r.balance)}$`;
                     if (type === 'level') value = `Ур. ${r.level} (${r.xp} XP)`;
                     if (type === 'rep') value = `${r.reputation > 0 ? '+' : ''}${r.reputation}`;
+                    if (type === 'duels') value = `${r.duel_wins} побед`;
+                    if (type === 'bonus') value = `${r.bonus_count} бонусов`;
                     
                     topText += `${emojis[count]} [id${uInfo.id}|${uInfo.first_name} ${uInfo.last_name || ''}] — ${value}\n`;
                     count++;
@@ -939,6 +962,10 @@ vk.updates.on('message_event', async (context) => {
                 
                 await updateBalance(winnerId, prize);
                 await updateBalance(loserId, -row.bet);
+                
+                // Добавляем победу в дуэлях
+                await dbRun("UPDATE users SET duel_wins = duel_wins + 1 WHERE user_id = ?", [String(winnerId)]);
+                
                 await dbRun("DELETE FROM active_duels WHERE msg_id = ?", [duelId]);
                 
                 const winnerName = await getFullName(winnerId);
