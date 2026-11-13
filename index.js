@@ -166,43 +166,37 @@ const getTopCoinsKb = () => Keyboard.builder().inline().callbackButton({
     color: Keyboard.SECONDARY_COLOR
 }).toString();
 
-// ===== ОБРАБОТКА СООБЩЕНИЙ =====
-vk.updates.on('message_new', async (message) => {
-    try {
-        // ===== ПРИВЕТСТВИЕ ПРИ ДОБАВЛЕНИИ =====
-        // Извлекаем action из всех возможных мест, чтобы точно поймать
-        const action = message.action || (message.raw && message.raw.action) || (message.object && message.object.action);
-
-        if (action) {
-            if (action.type === 'chat_invite_user' || action.type === 'chat_invite_user_by_link') {
-                if (String(action.member_id) === String(-GROUP_ID)) {
-                    const actKb = Keyboard.builder().inline()
-                        .callbackButton({ label: 'Активировать', payload: { cmd: 'activate_bot' }, color: Keyboard.POSITIVE_COLOR })
-                        .callbackButton({ label: 'Не активировать', payload: { cmd: 'decline_bot' }, color: Keyboard.NEGATIVE_COLOR });
-                    
-                    try {
-                        console.log(`[ПРИВЕТСТВИЕ] Пытаюсь отправить в ${message.peerId}...`);
-                        await vk.api.messages.send({
-                            peer_id: message.peerId,
-                            message: "📢 В данной беседе уже имеются сохранённые настройки, вы хотите чтобы я активировал их?",
-                            keyboard: actKb.toString(),
-                            random_id: Math.floor(Math.random() * 1000000000),
-                            group_id: GROUP_ID, 
-                            disable_mentions: 1
-                        });
-                        console.log(`[ПРИВЕТСТВИЕ] Успешно отправлено!`);
-                    } catch (err) {
-                        console.error(`[ОШИБКА ПРИВЕТСТВИЯ]`, err);
-                    }
-                    return; // Выходим, чтобы не выполнять команды дальше
-                }
-            }
+// ===== НОВЫЙ ОБРАБОТЧИК: ДОБАВЛЕНИЕ В БЕСЕДУ (chat_invite_user) =====
+vk.updates.on('chat_invite_user', async (context) => {
+    // context.memberId - тот, кого добавили. Если это наш бот:
+    if (String(context.memberId) === String(-GROUP_ID)) {
+        const actKb = Keyboard.builder().inline()
+            .callbackButton({ label: 'Активировать', payload: { cmd: 'activate_bot' }, color: Keyboard.POSITIVE_COLOR })
+            .callbackButton({ label: 'Не активировать', payload: { cmd: 'decline_bot' }, color: Keyboard.NEGATIVE_COLOR });
+        
+        try {
+            console.log(`[ПРИВЕТСТВИЕ] Бот добавлен в беседу ${context.peerId}. Отправляю...`);
+            await vk.api.messages.send({
+                peer_id: context.peerId,
+                message: "📢 В данной беседе уже имеются сохранённые настройки, вы хотите чтобы я активировал их?",
+                keyboard: actKb.toString(),
+                random_id: Math.floor(Math.random() * 1000000000),
+                group_id: GROUP_ID,
+                disable_mentions: 1
+            });
+            console.log(`[ПРИВЕТСТВИЕ] Успешно отправлено!`);
+        } catch (err) {
+            console.error(`[ОШИБКА ПРИВЕТСТВИЯ]`, err);
         }
+    }
+});
 
-        // Теперь проверяем на исходящие (для обычных сообщений)
-        if (message.isOutbox) return;
-        if (message.senderId < 0) return;
+// ===== ОБРАБОТКА ОБЫЧНЫХ СООБЩЕНИЙ И КОМАНД =====
+vk.updates.on('message_new', async (message) => {
+    if (message.isOutbox) return;
+    if (message.senderId < 0) return;
 
+    try {
         const text = message.text ? message.text.trim().toLowerCase() : '';
         if (!text) return;
 
