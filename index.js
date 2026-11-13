@@ -282,13 +282,16 @@ vk.updates.on('chat_invite_user', async (context) => {
 
 // ===== НОВЫЙ ОБРАБОТЧИК: КОММЕНТАРИИ (wall_reply_new) =====
 vk.updates.on('wall_reply_new', async (context) => {
-    console.log(`[КОММЕНТАРИИ] Получен комментарий от ID: ${context.fromId} под постом ID: ${context.postId}`);
+    // В vk-io данные комментария лежат в context.object
+    const comment = context.object;
     
-    if (Number(context.postId) !== Number(REWARD_POST_ID)) return;
-    if (context.fromId < 0) return;
-    if (context.fromId === -GROUP_ID || context.fromId === GROUP_ID) return;
+    console.log(`[КОММЕНТАРИИ] Получен комментарий от ID: ${comment.from_id} под постом ID: ${comment.post_id}`);
+    
+    if (Number(comment.post_id) !== Number(REWARD_POST_ID)) return;
+    if (comment.from_id < 0) return;
+    if (comment.from_id === -GROUP_ID || comment.from_id === GROUP_ID) return;
 
-    const userId = context.fromId;
+    const userId = comment.from_id;
 
     try {
         const isBlacklisted = await dbGet("SELECT reason FROM blacklist WHERE user_id = ?", [String(userId)]);
@@ -301,15 +304,15 @@ vk.updates.on('wall_reply_new', async (context) => {
         }
 
         await updateBalance(userId, REWARD_AMOUNT);
-        await dbRun("INSERT INTO comment_rewards (user_id, post_id) VALUES (?, ?)", [String(userId), String(context.postId)]);
+        await dbRun("INSERT INTO comment_rewards (user_id, post_id) VALUES (?, ?)", [String(userId), String(comment.post_id)]);
 
         const name = await getFullName(userId);
         
         await vk.api.wall.createComment({
-            owner_id: context.ownerId,
-            post_id: context.postId,
+            owner_id: comment.owner_id,
+            post_id: comment.post_id,
             from_group: 1,
-            reply_to_comment: context.id,
+            reply_to_comment: comment.id,
             message: `💸 ${name}, вы получили ${formatMoney(REWARD_AMOUNT)}$ за комментарий! 🎉`
         });
         
