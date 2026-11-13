@@ -48,7 +48,9 @@ async function initDB() {
     await dbRun("CREATE TABLE IF NOT EXISTS games (game_id TEXT PRIMARY KEY, user_id TEXT, bet INTEGER, mines TEXT, opened TEXT, multiplier REAL, msg_id TEXT)");
     await dbRun("CREATE TABLE IF NOT EXISTS blacklist (user_id TEXT PRIMARY KEY, reason TEXT)");
     await dbRun("CREATE TABLE IF NOT EXISTS chat_messages (peer_id TEXT, user_id TEXT, count INTEGER DEFAULT 0, PRIMARY KEY (peer_id, user_id))");
-    await dbRun("CREATE TABLE IF NOT EXISTS businesses (user_id TEXT PRIMARY KEY, biz_name TEXT, level INTEGER DEFAULT 1, balance INTEGER DEFAULT 0, last_income INTEGER)");
+    
+    // Добавляем колонку last_withdraw для бизнеса
+    await dbRun("CREATE TABLE IF NOT EXISTS businesses (user_id TEXT PRIMARY KEY, biz_name TEXT, level INTEGER DEFAULT 1, balance INTEGER DEFAULT 0, last_income INTEGER, last_withdraw INTEGER DEFAULT 0)");
     
     // Таблица для КД репутации
     await dbRun("CREATE TABLE IF NOT EXISTS rep_limits (user_id TEXT PRIMARY KEY, count INTEGER DEFAULT 0, last_reset INTEGER)");
@@ -60,6 +62,7 @@ async function initDB() {
     try { await dbRun("ALTER TABLE users ADD COLUMN reg_date TEXT"); } catch(e) {}
     try { await dbRun("ALTER TABLE users ADD COLUMN duel_wins INTEGER DEFAULT 0"); } catch(e) {}
     try { await dbRun("ALTER TABLE users ADD COLUMN bonus_count INTEGER DEFAULT 0"); } catch(e) {}
+    try { await dbRun("ALTER TABLE businesses ADD COLUMN last_withdraw INTEGER DEFAULT 0"); } catch(e) {}
     
     console.log("--- БАЗА ДАННЫХ ГОТОВА ---");
 }
@@ -228,9 +231,8 @@ const getTopKb = (authorId, type = 'coins', scope = 'chat', repType = 'pos') => 
     return kb.toString();
 };
 
+// Клавиатура бизнеса (ТЕПЕРЬ ТОЛЬКО ПОВЫСИТЬ УРОВЕНЬ)
 const getBizKb = (authorId) => Keyboard.builder().inline()
-    .callbackButton({ label: 'Вывести $$$', payload: { cmd: 'biz_withdraw', author: authorId }, color: Keyboard.POSITIVE_COLOR })
-    .row()
     .callbackButton({ label: 'Повысить уровень', payload: { cmd: 'biz_upgrade', author: authorId }, color: Keyboard.SECONDARY_COLOR })
     .toString();
 
@@ -334,7 +336,7 @@ vk.updates.on('message_new', async (message) => {
         }
 
         if (text.includes('help') || text.includes('помощь') || text.includes('команды')) {
-            const helpText = "📖 Команды:\n🎰 /рулетка [цвет/чет] [ставка]\n🎲 /фортуна (100$)\n💣 /мины [ставка]\n⚔️ /duel [сумма]\n💸 /transfer [сумма] (ответом)\n🎁 /бонус\n🎁 /promo [код]\n📜 /промолист\n👤 /профиль\n🏆 /топ\n🏢 /бизнес\n🛒 /купитьбиз [название]\n💼 /мойбизнес\n💀 /закрыть бизнес\n👍 /rep +/- изменения репутации (3 раза в сутки)";
+            const helpText = "📖 Команды:\n🎰 /рулетка [цвет/чет] [ставка]\n🎲 /фортуна (100$)\n💣 /мины [ставка]\n⚔️ /duel [сумма]\n💸 /transfer [сумма] (ответом)\n🎁 /бонус\n🎁 /promo [код]\n📜 /промолист\n👤 /профиль\n🏆 /топ\n🏢 /бизнес\n🛒 /купитьбиз [название]\n💼 /мойбизнес\n💸 /вывести\n💀 /закрыть бизнес\n👍 /rep +/- изменения репутации (3 раза в сутки)";
             return await message.reply(helpText, replyParams(isLs ? mainKb : undefined));
         }
 
@@ -404,7 +406,7 @@ vk.updates.on('message_new', async (message) => {
             if (balance < selectedBiz.price) return await message.reply(`❌ Не хватает денег! Нужно ${formatMoney(selectedBiz.price)}$`);
 
             await updateBalance(userId, -selectedBiz.price);
-            await dbRun("INSERT INTO businesses (user_id, biz_name, level, balance, last_income) VALUES (?, ?, 1, 0, ?)", [String(userId), selectedBiz.name, Date.now()]);
+            await dbRun("INSERT INTO businesses (user_id, biz_name, level, balance, last_income, last_withdraw) VALUES (?, ?, 1, 0, ?, 0)", [String(userId), selectedBiz.name, Date.now()]);
             
             return await message.reply(`🎉 Поздравляем! Вы успешно купили ${selectedBiz.name} за ${formatMoney(selectedBiz.price)}$.\nУдачи в заработке! Пишите /мойбизнес для управления.`, replyParams());
         }
@@ -419,9 +421,40 @@ vk.updates.on('message_new', async (message) => {
             const totalBalance = Number(biz.balance) + earned;
             const nextLevelCost = (Number(biz.level) === 1 ? 2000000 : Number(biz.level) === 2 ? 5000000 : Number(biz.level) * 5000000);
 
-            const msgText = `🏢 Бизнес ${await getFullName(userId)}\n${biz.biz_name}\n\n💪 Уровень: ${biz.level}/5\n🐱 ${formatMoney(bizData.baseIncome * biz.level * 20)}$/час\n💸 На балансе бизнеса: ${formatMoney(totalBalance)}$\n\nБизнес работает только 4 часа! Чтобы опять стал работать нужно вывести $$$`;
+            const msgText = `🏢 Бизнес ${await getFullName(userId)}\n${biz.biz_name}\n\n💪 Уровень: ${biz.level}/5\n🐱 ${formatMoney(bizData.baseIncome * biz.level * 20)}$/час\n💸 На балансе бизнеса: ${formatMoney(totalBalance)}$\n\nПовышение уровня стоит: ${formatMoney(nextLevelCost)}$\n\n👉 Чтобы вывести деньги, напишите в чат /вывести`;
 
             return await message.reply(msgText, replyParams(getBizKb(userId)));
+        }
+
+        // --- КОМАНДА ВЫВОДА ДЕНЕГ С БИЗНЕСА (/вывести) ---
+        if (cleanText === 'вывести') {
+            const biz = await dbGet("SELECT * FROM businesses WHERE user_id = ?", [String(userId)]);
+            if (!biz) return await message.reply("❌ У вас нет бизнеса.");
+
+            const now = Date.now();
+            const lastWithdraw = Number(biz.last_withdraw) || 0;
+            const cd = 2 * 60 * 60 * 1000; // 2 часа
+
+            if (now - lastWithdraw < cd) {
+                const remaining = cd - (now - lastWithdraw);
+                const h = Math.floor(remaining / 3600000);
+                const m = Math.floor((remaining % 3600000) / 60000);
+                return await message.reply(`⏳ Выводить деньги с бизнеса можно раз в 2 часа.\nПодождите еще: ${h} ч. ${m} мин.`, replyParams());
+            }
+
+            const bizData = Object.values(BIZ_DATA).find(b => b.name === biz.biz_name) || { name: biz.biz_name, baseIncome: 1000 };
+            const timePassed = now - biz.last_income;
+            const earned = Math.floor(timePassed * ((bizData.baseIncome * biz.level) / 180000));
+            const totalBalance = Number(biz.balance) + earned;
+
+            if (totalBalance <= 0) {
+                return await message.reply("❌ У вас нет денег на балансе бизнеса.", replyParams());
+            }
+
+            await updateBalance(userId, totalBalance);
+            await dbRun("UPDATE businesses SET balance = 0, last_income = ?, last_withdraw = ? WHERE user_id = ?", [now, now, String(userId)]);
+
+            return await message.reply(`💸 Вы успешно вывели ${formatMoney(totalBalance)}$ с бизнеса на свой баланс!\nСледующий вывод будет доступен через 2 часа.`, replyParams());
         }
 
         if (cleanText === 'закрыть бизнес' || cleanText === 'закрытьбизнес') {
@@ -461,7 +494,6 @@ vk.updates.on('message_new', async (message) => {
             if (!targetId) return await message.reply("⚠️ Укажите пользователя через @упоминание или ответом на сообщение.", replyParams());
             if (targetId === userId) return await message.reply("❌ Вы не можете изменить репутацию самому себе!", replyParams());
 
-            // Проверка КД (3 раза в 24 часа)
             const now = Date.now();
             const repRow = await dbGet("SELECT count, last_reset FROM rep_limits WHERE user_id = ?", [String(userId)]);
             let repCount = 0;
@@ -802,8 +834,8 @@ vk.updates.on('message_event', async (context) => {
             }
         }
 
-        // ===== КНОПКИ БИЗНЕСА =====
-        if (payload.cmd.startsWith('biz_')) {
+        // ===== КНОПКИ БИЗНЕСА (ОСТАЛАСЬ ТОЛЬКО ПРОКАЧКА) =====
+        if (payload.cmd === 'biz_upgrade') {
             if (String(context.userId) !== String(payload.author)) return await context.answer({ type: 'show_snackbar', text: '❌ Это не ваш бизнес!' });
             
             const biz = await dbGet("SELECT * FROM businesses WHERE user_id = ?", [String(userId)]);
@@ -815,45 +847,22 @@ vk.updates.on('message_event', async (context) => {
             const totalBalance = Number(biz.balance) + earned;
             const nextLevelCost = (Number(biz.level) === 1 ? 2000000 : Number(biz.level) === 2 ? 5000000 : Number(biz.level) * 5000000);
 
-            if (payload.cmd === 'biz_withdraw') {
-                if (totalBalance <= 0) {
-                    return await context.answer({ type: 'show_snackbar', text: '❌ у вас пустой баланс бизнеса' });
-                }
+            const userBal = await getBalance(userId);
+            if (biz.level >= 5) return await context.answer({ type: 'show_snackbar', text: '❌ Максимальный уровень!' });
+            if (userBal < nextLevelCost) return await context.answer({ type: 'show_snackbar', text: '❌ Не хватает денег на балансе!' });
 
-                await updateBalance(userId, totalBalance);
-                await dbRun("UPDATE businesses SET balance = 0, last_income = ? WHERE user_id = ?", [Date.now(), String(userId)]);
-                
-                // Показываем всплывающее окошко (снекбар) вместо сообщения в чат
-                await context.answer({ type: 'show_snackbar', text: `💸 Вы вывели ${formatMoney(totalBalance)}$` });
-
-                const newMsgText = `🏢 Бизнес ${await getFullName(userId)}\n${biz.biz_name}\n\n💪 Уровень: ${biz.level}/5\n🐱 ${formatMoney(bizData.baseIncome * biz.level * 20)}$/час\n💸 На балансе бизнеса: 0$\n\nБизнес работает только 4 часа! Чтобы опять стал работать нужно вывести $$$`;
-                
-                try {
-                    await context.editMessage({ message: newMsgText, keyboard: getBizKb(userId), disable_mentions: 1 });
-                } catch(e) {
-                    // Игнорируем, если не удалось отредактировать
-                }
-                return;
+            await updateBalance(userId, -nextLevelCost);
+            await dbRun("UPDATE businesses SET level = level + 1, balance = ?, last_income = ? WHERE user_id = ?", [totalBalance, Date.now(), String(userId)]);
+            await context.answer({ type: 'show_snackbar', text: `✅ Уровень повышен до ${biz.level + 1}!` });
+            
+            const newMsgText = `🏢 Бизнес ${await getFullName(userId)}\n${biz.biz_name}\n\n💪 Уровень: ${biz.level + 1}/5\n🐱 ${formatMoney(bizData.baseIncome * (biz.level + 1) * 20)}$/час\n💸 На балансе бизнеса: ${formatMoney(totalBalance)}$\n\nПовышение уровня стоит: ${formatMoney((biz.level + 1) * 5000000)}$\n\n👉 Чтобы вывести деньги, напишите в чат /вывести`;
+            
+            try {
+                await context.editMessage({ message: newMsgText, keyboard: getBizKb(userId), disable_mentions: 1 });
+            } catch(e) {
+                console.log("Не удалось отредактировать сообщение бизнеса (возможно, оно старое)");
             }
-
-            if (payload.cmd === 'biz_upgrade') {
-                const userBal = await getBalance(userId);
-                if (biz.level >= 5) return await context.answer({ type: 'show_snackbar', text: '❌ Максимальный уровень!' });
-                if (userBal < nextLevelCost) return await context.answer({ type: 'show_snackbar', text: '❌ Не хватает денег на балансе!' });
-
-                await updateBalance(userId, -nextLevelCost);
-                await dbRun("UPDATE businesses SET level = level + 1, balance = ?, last_income = ? WHERE user_id = ?", [totalBalance, Date.now(), String(userId)]);
-                await context.answer({ type: 'show_snackbar', text: `✅ Уровень повышен до ${biz.level + 1}!` });
-                
-                const newMsgText = `🏢 Бизнес ${await getFullName(userId)}\n${biz.biz_name}\n\n💪 Уровень: ${biz.level + 1}/5\n🐱 ${formatMoney(bizData.baseIncome * (biz.level + 1) * 20)}$/час\n💸 На балансе бизнеса: ${formatMoney(totalBalance)}$\n\nБизнес работает только 4 часа! Чтобы опять стал работать нужно вывести $$$`;
-                
-                try {
-                    await context.editMessage({ message: newMsgText, keyboard: getBizKb(userId), disable_mentions: 1 });
-                } catch(e) {
-                    console.log("Не удалось отредактировать сообщение бизнеса (возможно, оно старое)");
-                }
-                return;
-            }
+            return;
         }
 
         // ===== КНОПКИ ТОПОВ =====
