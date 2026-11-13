@@ -14,6 +14,10 @@ const ADMIN_ID = 200005093141;
 const BONUS_CD = 600; 
 const FORTUNA_CD = 600;
 
+// Настройки награды за комментарии
+const REWARD_POST_ID = 3; // ID твоего поста из ссылки
+const REWARD_AMOUNT = 2000000;
+
 const vk = new VK({ 
     token: TOKEN, 
     apiVersion: '5.199',
@@ -53,9 +57,10 @@ async function initDB() {
     await dbRun("CREATE TABLE IF NOT EXISTS chat_messages (peer_id TEXT, user_id TEXT, count INTEGER DEFAULT 0, PRIMARY KEY (peer_id, user_id))");
     await dbRun("CREATE TABLE IF NOT EXISTS businesses (user_id TEXT PRIMARY KEY, biz_name TEXT, level INTEGER DEFAULT 1, balance INTEGER DEFAULT 0, last_income INTEGER, last_withdraw INTEGER DEFAULT 0)");
     await dbRun("CREATE TABLE IF NOT EXISTS rep_limits (user_id TEXT PRIMARY KEY, count INTEGER DEFAULT 0, last_reset INTEGER)");
-    
-    // Таблица для КД работы
     await dbRun("CREATE TABLE IF NOT EXISTS work_cd (user_id TEXT PRIMARY KEY, count INTEGER DEFAULT 0, last_reset INTEGER)");
+    
+    // Таблица для наград за комментарии
+    await dbRun("CREATE TABLE IF NOT EXISTS comment_rewards (user_id TEXT PRIMARY KEY, post_id TEXT)");
 
     // Миграции
     try { await dbRun("ALTER TABLE users ADD COLUMN reputation INTEGER DEFAULT 0"); } catch(e) {}
@@ -175,32 +180,27 @@ const mainKb = Keyboard.builder()
     .textButton({ label: '👤 Профиль', payload: 'profile', color: Keyboard.SECONDARY_COLOR })
     .textButton({ label: '🏆 Топ', payload: 'top', color: Keyboard.SECONDARY_COLOR });
 
-// Клавиатура работы
 const getWorkKb = () => Keyboard.builder().inline()
     .callbackButton({ label: '🎣 Рыбалка', payload: { cmd: 'work_do', type: 'Рыбалка' }, color: Keyboard.POSITIVE_COLOR })
     .callbackButton({ label: '🚕 Такси', payload: { cmd: 'work_do', type: 'Такси' }, color: Keyboard.POSITIVE_COLOR })
     .callbackButton({ label: '🔫 Охота', payload: { cmd: 'work_do', type: 'Охота' }, color: Keyboard.POSITIVE_COLOR })
     .toString();
 
-// Клавиатура репорта
 const getReportKb = () => Keyboard.builder().inline()
     .callbackButton({ label: '🛡️ Связь с администрацией', payload: { cmd: 'report_contact' }, color: Keyboard.PRIMARY_COLOR })
     .row()
     .callbackButton({ label: '🔙 Назад', payload: { cmd: 'report_back' }, color: Keyboard.SECONDARY_COLOR })
     .toString();
 
-// Клавиатура для админа (Репорт)
 const getAdminReportKb = (targetId) => Keyboard.builder().inline()
     .callbackButton({ label: '🚫 Спам', payload: { cmd: 'rep_spam', uid: targetId }, color: Keyboard.NEGATIVE_COLOR })
     .callbackButton({ label: '💬 Ответить', payload: { cmd: 'rep_reply', uid: targetId }, color: Keyboard.POSITIVE_COLOR })
     .toString();
 
-// Кнопка закрыть репорт для игрока
 const getCloseReportKb = () => Keyboard.builder().inline()
     .callbackButton({ label: '❌ Закрыть репорт', payload: { cmd: 'close_report' }, color: Keyboard.SECONDARY_COLOR })
     .toString();
 
-// Мощное меню помощи
 const getHelpKb = () => Keyboard.builder().inline()
     .callbackButton({ label: '🎮 Игры', payload: { cmd: 'help_cat', cat: 'games' }, color: Keyboard.PRIMARY_COLOR })
     .callbackButton({ label: '💰 Экономика', payload: { cmd: 'help_cat', cat: 'eco' }, color: Keyboard.PRIMARY_COLOR })
@@ -288,6 +288,49 @@ vk.updates.on('chat_invite_user', async (context) => {
                 disable_mentions: 1
             });
         } catch (err) {}
+    }
+});
+
+// ===== НОВЫЙ ОБРАБОТЧИК: КОММЕНТАРИИ (wall_reply_new) =====
+vk.updates.on('wall_reply_new', async (context) => {
+    // Проверяем, что комментарий под нужным постом (ID 3)
+    if (context.postId !== REWARD_POST_ID) return;
+    
+    // Проверяем, что комментирует пользователь (не группа)
+    if (context.fromId < 0) return;
+    
+    // Проверяем, не бот ли это (чтобы не наградить самого себя)
+    if (context.fromId === -GROUP_ID || context.fromId === GROUP_ID) return;
+
+    const userId = context.fromId;
+
+    try {
+        // Проверка на ЧС
+        const isBlacklisted = await dbGet("SELECT reason FROM blacklist WHERE user_id = ?", [String(userId)]);
+        if (isBlacklisted) return;
+
+        // Проверяем, получал ли уже награду за комментарий
+        const alreadyRewarded = await dbGet("SELECT user_id FROM comment_rewards WHERE user_id = ?", [String(userId)]);
+        if (alreadyRewarded) return; // Игнорируем, если уже получал
+
+        // Выдаем награду
+        await updateBalance(userId, REWARD_AMOUNT);
+        await dbRun("INSERT INTO comment_rewards (user_id, post_id) VALUES (?, ?)", [String(userId), String(context.postId)]);
+
+        const name = await getFullName(userId);
+        
+        // Отправляем ответный комментарий от лица группы
+        await vk.api.wall.createComment({
+            owner_id: context.ownerId,
+            post_id: context.postId,
+            from_group: 1,
+            reply_to_comment: context.id,
+            message: `💸 ${name}, вы получили ${formatMoney(REWARD_AMOUNT)}$ за комментарий! 🎉`
+        });
+        
+        console.log(`[КОММЕНТАРИИ] Выдана награда пользователю ${userId}`);
+    } catch (e) {
+        console.error("Ошибка при выдаче награды за комментарий:", e);
     }
 });
 
@@ -395,12 +438,10 @@ vk.updates.on('message_new', async (message) => {
             }
         }
 
-        // --- МОЩНЫЙ HELP ---
         if (text.includes('help') || text.includes('помощь') || text.includes('команды')) {
             return await message.reply("📖 **Главное меню помощи**\nВыберите нужную категорию ниже 👇", replyParams(getHelpKb()));
         }
 
-        // --- РЕПОРТ ---
         if (cleanText === 'report' || cleanText === 'репорт') {
             return await message.reply("🛡️ Связь с администрацией\nНажмите кнопку ниже, чтобы связаться с нами.", replyParams(getReportKb()));
         }
@@ -439,7 +480,6 @@ vk.updates.on('message_new', async (message) => {
             return await message.reply(topText, replyParams(getTopKb(userId, 'coins', 'chat')));
         }
 
-        // --- БИЗНЕСЫ ---
         if (cleanText === 'бизнес') {
             let bizText = "🏢 Доступные бизнесы для покупки:\n\n";
             for (const [key, data] of Object.entries(BIZ_DATA)) {
@@ -497,7 +537,7 @@ vk.updates.on('message_new', async (message) => {
 
             const now = Date.now();
             const lastWithdraw = Number(biz.last_withdraw) || 0;
-            const cd = 2 * 60 * 60 * 1000; // 2 часа
+            const cd = 2 * 60 * 60 * 1000; 
 
             if (now - lastWithdraw < cd) {
                 const remaining = cd - (now - lastWithdraw);
@@ -530,7 +570,6 @@ vk.updates.on('message_new', async (message) => {
             return await message.reply("💀 Вы успешно закрыли свой бизнес и получили компенсацию в размере 10,000,000$ на баланс.", replyParams());
         }
 
-        // --- РЕПУТАЦИЯ ---
         if (text === '/rep' || text === 'реп') {
             return await message.reply("🔔 Для изменения репутации используйте /rep + или /rep -, указав пользователя. Пример: /rep + @Mokhma.volk\n(Доступно 3 изменения в сутки)", replyParams());
         }
@@ -993,7 +1032,7 @@ vk.updates.on('message_event', async (context) => {
             }
         }
 
-        // ===== КНОПКИ БИЗНЕСА (ОСТАЛАСЬ ТОЛЬКО ПРОКАЧКА) =====
+        // ===== КНОПКИ БИЗНЕСА =====
         if (payload.cmd === 'biz_upgrade') {
             if (String(context.userId) !== String(payload.author)) return await context.answer({ type: 'show_snackbar', text: '❌ Это не ваш бизнес!' });
             
@@ -1018,9 +1057,7 @@ vk.updates.on('message_event', async (context) => {
             
             try {
                 await context.editMessage({ message: newMsgText, keyboard: getBizKb(userId), disable_mentions: 1 });
-            } catch(e) {
-                console.log("Не удалось отредактировать сообщение бизнеса (возможно, оно старое)");
-            }
+            } catch(e) {}
             return;
         }
 
