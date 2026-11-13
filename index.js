@@ -8,7 +8,7 @@ console.log("ВЕРСИЯ NODE.JS:", process.version);
 console.log("=========================================");
 
 // ===== НАСТРОЙКИ =====
-const TOKEN = "vk1.a.K6H21Ezx3iiNIiHM5Xe8LiL_Uto5Q3UBixGMIdGETKmStwhfTmUmjad9K2YMVptEipNk0chqVadrmScyl5uISAYcI6IUfqaj8UlW25bo7ZwLxhQIsQ4sX6vJx8_wD1y2ZtJe-aaX4egzHx8YMFQ2gvObMiqfEUCS5PqYHPXXNigRJ6m0EAiatL6xWwjIJRaRTcPVo_hYGRad1TOz8anPJLzl4VJUem7AE3I_QwzYUVY";
+const TOKEN = "vk1.a.KhWSBHlF9P2PScW-7_RjYfo_-nSXdof8v7djx9V2ZBO8fs7hyuI3modscfofRSUOy5CJUZu5DwlRnoZ14j5HIe8bukJK7iPnYr_NqFwIeHjFkh_u0MRDvN07ZZfnbgIe6dZo2QBrihqyOeVgqtzJuI75m4EFMUTb4hicEet1DNBWCke0-eahDyGxEAA01yYYqZHlMSCTOdy7HU7tjcoCR_SNutXQ4Inw7eiMYLxKjws";
 const GROUP_ID = 243089386;
 const ADMIN_ID = 200005093141;
 const BONUS_CD = 600; 
@@ -295,7 +295,10 @@ vk.updates.on('wall_reply_new', async (context) => {
         if (isBlacklisted) return;
 
         const alreadyRewarded = await dbGet("SELECT user_id FROM comment_rewards WHERE user_id = ?", [String(userId)]);
-        if (alreadyRewarded) return;
+        if (alreadyRewarded) {
+            console.log(`[КОММЕНТАРИИ] Игрок ${userId} уже получал награду.`);
+            return;
+        }
 
         await updateBalance(userId, REWARD_AMOUNT);
         await dbRun("INSERT INTO comment_rewards (user_id, post_id) VALUES (?, ?)", [String(userId), String(context.postId)]);
@@ -436,7 +439,6 @@ vk.updates.on('message_new', async (message) => {
                 return await message.reply("Формат: /report [текст]\nИли нажмите кнопку ниже, чтобы связаться с администрацией.", replyParams(getReportKb()));
             }
 
-            // Если есть текст, сразу отправляем
             await vk.api.messages.send({
                 peer_id: ADMIN_ID,
                 message: `🚨 Новый репорт от ${await getFullName(userId)}!\n\n📝 Текст: ${reportText}`,
