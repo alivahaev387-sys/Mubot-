@@ -472,7 +472,6 @@ vk.updates.on('message_new', async (message) => {
                 repReset = Number(repRow.last_reset);
             }
 
-            // Если прошло больше 24 часов, сбрасываем
             if (now - repReset >= 86400000) {
                 repCount = 0;
                 repReset = now;
@@ -486,7 +485,6 @@ vk.updates.on('message_new', async (message) => {
                 return await message.reply(`⏳ Вы исчерпали лимит на изменение репутации (3 раза в сутки).\nПопробуйте снова через ${hours} ч. ${minutes} мин. ${seconds} сек.`, replyParams());
             }
 
-            // Обновляем КД
             repCount++;
             await dbRun("REPLACE INTO rep_limits (user_id, count, last_reset) VALUES (?, ?, ?)", [String(userId), repCount, repReset]);
 
@@ -818,18 +816,22 @@ vk.updates.on('message_event', async (context) => {
             const nextLevelCost = (Number(biz.level) === 1 ? 2000000 : Number(biz.level) === 2 ? 5000000 : Number(biz.level) * 5000000);
 
             if (payload.cmd === 'biz_withdraw') {
-                if (totalBalance <= 0) return await context.answer({ type: 'show_snackbar', text: '❌ у вас пустой баланс бизнеса' });
-                
+                // ИСПРАВЛЕНИЕ БАГА: Минимальная сумма для вывода, чтобы не спамили по 200$
+                if (totalBalance < 5000) {
+                    return await context.answer({ type: 'show_snackbar', text: '❌ Слишком маленькая сумма. Подождите, пока накопится хотя бы 5,000$!' });
+                }
+
                 await updateBalance(userId, totalBalance);
                 await dbRun("UPDATE businesses SET balance = 0, last_income = ? WHERE user_id = ?", [Date.now(), String(userId)]);
-                await context.answer({ type: 'show_snackbar', text: `💸 Вы вывели ${formatMoney(totalBalance)}$` });
+                await context.answer({ type: 'show_snackbar', text: `💸 Вы вывели ${formatMoney(totalBalance)}$!` });
                 
                 const newMsgText = `🏢 Бизнес ${await getFullName(userId)}\n${biz.biz_name}\n\n💪 Уровень: ${biz.level}/5\n🐱 ${formatMoney(bizData.baseIncome * biz.level * 20)}$/час\n💸 На балансе бизнеса: 0$\n\nБизнес работает только 4 часа! Чтобы опять стал работать нужно вывести $$$`;
                 
                 try {
                     await context.editMessage({ message: newMsgText, keyboard: getBizKb(userId), disable_mentions: 1 });
                 } catch(e) {
-                    console.log("Не удалось отредактировать сообщение бизнеса (возможно, оно старое)");
+                    // Если ВК не дает редактировать старое сообщение - просто ничего не делаем, чтобы не спамить
+                    console.log("Не удалось отредактировать сообщение бизнеса:", e.message);
                 }
                 return;
             }
