@@ -173,23 +173,19 @@ vk.updates.on('message_new', async (message) => {
     if (message.senderId < 0) return;
 
     try {
-        // ПРИВЕТСТВИЕ ПРИ ДОБАВЛЕНИИ В БЕСЕДУ
+        // ПРИВЕТСТВИЕ КАК У STAR MANAGER
         if (message.action) {
             const action = message.action;
-            console.log(`[СОБЫТИЕ В БЕСЕДЕ] Тип: ${action.type}, member_id: ${action.member_id}`);
             
             if (action.type === 'chat_invite_user' || action.type === 'chat_invite_user_by_link') {
                 if (String(action.member_id) === String(-GROUP_ID)) {
-                    const actKb = Keyboard.builder().inline().callbackButton({
-                        label: '🚀 Активировать',
-                        payload: { cmd: 'activate_bot' },
-                        color: Keyboard.POSITIVE_COLOR
-                    });
+                    const actKb = Keyboard.builder().inline()
+                        .callbackButton({ label: 'Активировать', payload: { cmd: 'activate_bot' }, color: Keyboard.POSITIVE_COLOR })
+                        .callbackButton({ label: 'Не активировать', payload: { cmd: 'decline_bot' }, color: Keyboard.NEGATIVE_COLOR });
                     
-                    // ИСПРАВЛЕНИЕ: Отправляем напрямую через API, без reply, так как системное сообщение нельзя цитировать
                     return await vk.api.messages.send({
                         peer_id: message.peerId,
-                        message: "👋 Добро пожаловать! Я официальный игровой бот Game Zone.\n\nДля начала работы выдайте мне администратора и напишите /help.\n\nВнизу нажмите кнопку для активации:",
+                        message: "📢 В данной беседе уже имеются сохранённые настройки, вы хотите чтобы я активировал их?",
                         keyboard: actKb.toString(),
                         random_id: Math.floor(Math.random() * 1000000000),
                         disable_mentions: 1
@@ -488,7 +484,6 @@ vk.updates.on('message_new', async (message) => {
         if (cleanText.startsWith('promo')) {
             if (parts.length === 2) {
                 
-                // ПРОВЕРКА НА ПОДПИСКУ
                 try {
                     const isMember = await vk.api.groups.isMember({ group_id: GROUP_ID, user_id: userId });
                     if (isMember !== 1) {
@@ -545,32 +540,31 @@ vk.updates.on('message_event', async (context) => {
         const payload = context.eventPayload;
         const userId = context.userId;
         
-        // ОБРАБОТКА КНОПКИ "АКТИВИРОВАТЬ"
+        // ОБРАБОТКА КНОПКИ "АКТИВИРОВАТЬ" (Как у Star Manager)
         if (payload.cmd === 'activate_bot') {
             try {
                 const members = await vk.api.messages.getConversationMembers({ peer_id: context.peerId });
-                
-                const member = members.items.find(m => m.member_id == context.userId);
                 const bot = members.items.find(m => m.member_id == -GROUP_ID || m.member_id == GROUP_ID);
-
-                const isUserAdmin = member && (member.is_admin || member.is_owner);
                 const isBotAdmin = bot && bot.is_admin;
 
-                if (!isUserAdmin) {
-                    return await context.answer({ type: 'show_snackbar', text: '❌ У вас нет прав для активации бота!' });
-                }
-
                 if (!isBotAdmin) {
-                    return await context.answer({ type: 'show_snackbar', text: '❌ Ошибка бот не является администратором' });
+                    return await context.answer({ type: 'show_snackbar', text: '❌ Ошибка. Убедитесь, что бот владеет статусом администратора.' });
                 }
 
                 await context.answer({ type: 'show_snackbar', text: '✅ Бот успешно активирован!' });
-                await context.editMessage({ message: "✅ Бот успешно активирован и готов к работе!\n\nНапишите /help, чтобы увидеть список команд.", keyboard: null });
+                await context.editMessage({ message: "🎉 Вы подключили бота к беседе!\nЧтобы узнать подробности напишите /help" });
                 return;
             } catch (e) {
                 console.error("Ошибка активации:", e);
                 return await context.answer({ type: 'show_snackbar', text: '❌ Ошибка при проверке прав.' });
             }
+        }
+
+        // ОБРАБОТКА КНОПКИ "НЕ АКТИВИРОВАТЬ"
+        if (payload.cmd === 'decline_bot') {
+            await context.answer({ type: 'show_snackbar', text: 'Активация отменена.' });
+            await context.editMessage({ message: "❌ Активация отменена. Чтобы начать работу, добавьте бота заново." });
+            return;
         }
 
         if (payload.cmd === 'duel_accept') {
