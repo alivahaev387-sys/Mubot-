@@ -173,7 +173,7 @@ vk.updates.on('message_new', async (message) => {
     if (message.senderId < 0) return;
 
     try {
-        // ПРИВЕТСТВИЕ КАК У STAR MANAGER
+        // ===== ПРИВЕТСТВИЕ ПРИ ДОБАВЛЕНИИ (БЕЗ РЕПЛАЯ) =====
         if (message.action) {
             const action = message.action;
             
@@ -183,13 +183,19 @@ vk.updates.on('message_new', async (message) => {
                         .callbackButton({ label: 'Активировать', payload: { cmd: 'activate_bot' }, color: Keyboard.POSITIVE_COLOR })
                         .callbackButton({ label: 'Не активировать', payload: { cmd: 'decline_bot' }, color: Keyboard.NEGATIVE_COLOR });
                     
-                    return await vk.api.messages.send({
-                        peer_id: message.peerId,
-                        message: "📢 В данной беседе уже имеются сохранённые настройки, вы хотите чтобы я активировал их?",
-                        keyboard: actKb.toString(),
-                        random_id: Math.floor(Math.random() * 1000000000),
-                        disable_mentions: 1
-                    });
+                    try {
+                        await vk.api.messages.send({
+                            peer_id: message.peerId,
+                            message: "📢 В данной беседе уже имеются сохранённые настройки, вы хотите чтобы я активировал их?",
+                            keyboard: actKb.toString(),
+                            random_id: Math.floor(Math.random() * 1000000000),
+                            disable_mentions: 1
+                        });
+                        console.log(`[ПРИВЕТСТВИЕ] Успешно отправлено в ${message.peerId}`);
+                    } catch (err) {
+                        console.error(`[ОШИБКА ПРИВЕТСТВИЯ]`, err);
+                    }
+                    return; // Выходим, чтобы не обрабатывать дальше
                 }
             }
         }
@@ -540,7 +546,6 @@ vk.updates.on('message_event', async (context) => {
         const payload = context.eventPayload;
         const userId = context.userId;
         
-        // ОБРАБОТКА КНОПКИ "АКТИВИРОВАТЬ" (Как у Star Manager)
         if (payload.cmd === 'activate_bot') {
             try {
                 const members = await vk.api.messages.getConversationMembers({ peer_id: context.peerId });
@@ -560,7 +565,6 @@ vk.updates.on('message_event', async (context) => {
             }
         }
 
-        // ОБРАБОТКА КНОПКИ "НЕ АКТИВИРОВАТЬ"
         if (payload.cmd === 'decline_bot') {
             await context.answer({ type: 'show_snackbar', text: 'Активация отменена.' });
             await context.editMessage({ message: "❌ Активация отменена. Чтобы начать работу, добавьте бота заново." });
