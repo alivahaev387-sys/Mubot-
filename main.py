@@ -20,13 +20,14 @@ vk = vk_session.get_api()
 
 print("--- БОТ ЗАПУЩЕН УСПЕШНО ---")
 
-# ===== ЖЕСТКАЯ ФУНКЦИЯ ОТПРАВКИ С РЕПЛАЕМ =====
+# ===== ИСПРАВЛЕННАЯ ФУНКЦИЯ ОТПРАВКИ (ДОБАВЛЕН group_id) =====
 def send_msg(peer_id, message, keyboard=None, reply_to=None):
     try:
         params = {
             'peer_id': peer_id, 
             'message': message, 
             'random_id': random.randint(1, 2**31 - 1),
+            'group_id': GROUP_ID, # БЕЗ ЭТОГО РЕПЛАЙ В БЕСЕДАХ НЕ РАБОТАЕТ
             'disable_mentions': 1 
         }
         if keyboard: 
@@ -620,27 +621,36 @@ while True:
                         continue
                         
                     if clean_text.startswith('деньги'):
-                        if len(parts) == 2 and parts[1].isdigit() and 'reply_message' in msg:
+                        target_id = None
+                        if 'reply_message' in msg:
                             target_id = msg['reply_message']['from_id']
-                            update_balance(target_id, int(parts[1]))
-                            send_msg(peer_id, f"✅ Выдано {parts[1]}$ игроку {get_name(target_id)}", reply_to=msg['id'])
                         else:
-                            send_msg(peer_id, "❌ Формат: /деньги [сумма] (ответом на сообщение)", reply_to=msg['id'])
+                            match = re.search(r'\[id(\d+)\|', msg['text']) or re.search(r'@id(\d+)', msg['text'])
+                            if match: target_id = int(match.group(1))
+                        
+                        if len(parts) >= 2 and parts[1].isdigit() and target_id:
+                            amount = int(parts[1])
+                            update_balance(target_id, amount)
+                            send_msg(peer_id, f"✅ Выдано {fmt(amount)}$ игроку {get_name(target_id)}", reply_to=msg['id'])
+                        else:
+                            send_msg(peer_id, "❌ Формат: /деньги [сумма] (ответом ИЛИ с @упоминанием)", reply_to=msg['id'])
                         continue
                         
                     if clean_text.startswith('создать'):
-                        if len(parts) == 4:
+                        if len(parts) == 4 and parts[2].isdigit() and parts[3].isdigit():
                             conn = get_db(); c = conn.cursor()
                             c.execute("REPLACE INTO promos (code, amount, limit_count, used_by) VALUES (?, ?, ?, '')", (parts[1], int(parts[2]), int(parts[3])))
                             conn.commit(); conn.close()
-                            send_msg(peer_id, "✅ Промокод создан.", reply_to=msg['id'])
+                            send_msg(peer_id, f"✅ Промокод {parts[1]} создан на {parts[2]}$", reply_to=msg['id'])
+                        else:
+                            send_msg(peer_id, "❌ Формат: /создать [код] [сумма] [лимит]", reply_to=msg['id'])
                         continue
                         
                     if clean_text == 'cp':
                         conn = get_db(); c = conn.cursor()
                         c.execute("DELETE FROM promos")
                         conn.commit(); conn.close()
-                        send_msg(peer_id, "✅ Промо удалены.", reply_to=msg['id'])
+                        send_msg(peer_id, "✅ Все промокоды удалены.", reply_to=msg['id'])
                         continue
 
                 if clean_text == 'промолист':
