@@ -155,14 +155,12 @@ const getMinesFieldKb = (gameId, opened, mines, isGameOver = false) => {
     return kb.toString();
 };
 
-// Кнопка для переключения на монеты
 const getTopMsgKb = () => Keyboard.builder().inline().callbackButton({
     label: '💰 Топ по монетам',
     payload: { cmd: 'top_coins' },
     color: Keyboard.SECONDARY_COLOR
 }).toString();
 
-// Кнопка для переключения обратно на сообщения
 const getTopCoinsKb = () => Keyboard.builder().inline().callbackButton({
     label: '🔙 Назад',
     payload: { cmd: 'top_messages' },
@@ -175,6 +173,22 @@ vk.updates.on('message_new', async (message) => {
     if (message.senderId < 0) return;
 
     try {
+        // НОВОЕ: ПРИВЕТСТВИЕ ПРИ ДОБАВЛЕНИИ В БЕСЕДУ
+        if (message.action) {
+            const action = message.action;
+            if (action.type === 'chat_invite_user' || action.type === 'chat_invite_user_by_link') {
+                // Проверяем, добавили ли именно нашего бота (у ботов ID отрицательный)
+                if (Math.abs(action.member_id) === GROUP_ID) {
+                    const actKb = Keyboard.builder().inline().callbackButton({
+                        label: '🚀 Активировать',
+                        payload: { cmd: 'activate_bot' },
+                        color: Keyboard.POSITIVE_COLOR
+                    });
+                    return await message.reply("👋 Добро пожаловать! Я официальный игровой бот Game Zone.\n\nДля начала работы выдайте мне администратора и напишите /help.\n\nВнизу нажмите кнопку для активации:", { keyboard: actKb.toString(), disable_mentions: 1 });
+                }
+            }
+        }
+
         const text = message.text ? message.text.trim().toLowerCase() : '';
         if (!text) return;
 
@@ -464,6 +478,21 @@ vk.updates.on('message_new', async (message) => {
 
         if (cleanText.startsWith('promo')) {
             if (parts.length === 2) {
+                
+                // НОВОЕ: ПРОВЕРКА НА ПОДПИСКУ
+                try {
+                    const isMember = await vk.api.groups.isMember({ group_id: GROUP_ID, user_id: userId });
+                    if (isMember !== 1) {
+                        const subKb = Keyboard.builder().inline().urlButton({
+                            label: '📢 Подписаться',
+                            url: `https://vk.com/public${GROUP_ID}`
+                        });
+                        return await message.reply("⚠️ Промокоды доступны только подписчикам нашего сообщества!\n\nПодпишитесь на группу и попробуйте снова.", replyParams(subKb.toString()));
+                    }
+                } catch (e) {
+                    console.log("Ошибка при проверке подписки:", e);
+                }
+
                 const row = await dbGet("SELECT amount, limit_count, used_by FROM promos WHERE code = ?", [parts[1]]);
                 
                 if (!row) return await message.reply("❌ Промокод не существует или исчерпан.", replyParams());
@@ -507,6 +536,38 @@ vk.updates.on('message_event', async (context) => {
         const payload = context.eventPayload;
         const userId = context.userId;
         
+        // НОВОЕ: ОБРАБОТКА КНОПКИ "АКТИВИРОВАТЬ"
+        if (payload.cmd === 'activate_bot') {
+            try {
+                const members = await vk.api.messages.getConversationMembers({ peer_id: context.peerId });
+                
+                // Ищем того, кто нажал, и ищем бота
+                const member = members.items.find(m => m.member_id == context.userId);
+                const bot = members.items.find(m => m.member_id == -GROUP_ID || m.member_id == GROUP_ID);
+
+                const isUserAdmin = member && (member.is_admin || member.is_owner);
+                const isBotAdmin = bot && bot.is_admin;
+
+                // Если нажал не админ беседы
+                if (!isUserAdmin) {
+                    return await context.answer({ type: 'show_snackbar', text: '❌ У вас нет прав для активации бота!' });
+                }
+
+                // Если нажал админ, но боту не дали админку
+                if (!isBotAdmin) {
+                    return await context.answer({ type: 'show_snackbar', text: '❌ Ошибка бот не является администратором' });
+                }
+
+                // Всё успешно
+                await context.answer({ type: 'show_snackbar', text: '✅ Бот успешно активирован!' });
+                await context.editMessage({ message: "✅ Бот успешно активирован и готов к работе!\n\nНапишите /help, чтобы увидеть список команд.", keyboard: null });
+                return;
+            } catch (e) {
+                console.error("Ошибка активации:", e);
+                return await context.answer({ type: 'show_snackbar', text: '❌ Ошибка при проверке прав.' });
+            }
+        }
+
         if (payload.cmd === 'duel_accept') {
             const duelId = payload.duel_id;
             const row = await dbGet("SELECT challenger, bet FROM active_duels WHERE msg_id = ?", [duelId]);
