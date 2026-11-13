@@ -146,7 +146,7 @@ const getTopCoinsKb = () => Keyboard.builder().inline().callbackButton({
     label: '🔙 Назад', payload: { cmd: 'top_messages' }, color: Keyboard.SECONDARY_COLOR
 }).toString();
 
-// ===== ПРИВЕТСТВИЕ ПРИ ДОБАВЛЕНИИ =====
+// ===== ОБРАБОТКА СООБЩЕНИЙ =====
 vk.updates.on('chat_invite_user', async (context) => {
     if (String(context.memberId) === String(-GROUP_ID)) {
         try {
@@ -161,12 +161,9 @@ vk.updates.on('chat_invite_user', async (context) => {
     }
 });
 
-// ===== ОБРАБОТКА СООБЩЕНИЙ =====
 vk.updates.on('message_new', async (message) => {
-    // Защита от дублей и системных сообщений
     if (message.isOutbox) return;
     if (message.senderId < 0) return;
-    if (message.action) return; // Игнорируем системные события, чтобы не было двойного ответа
 
     try {
         const text = message.text ? message.text.trim().toLowerCase() : '';
@@ -218,6 +215,7 @@ vk.updates.on('message_new', async (message) => {
             } catch (e) { return await message.reply("⚠️ Ошибка проверки прав.", replyParams()); }
         }
 
+        // ОБНОВЛЕННЫЙ /HELP
         if (text.includes('help') || text.includes('помощь') || text.includes('команды')) {
             const helpText = "📖 Доступные команды:\n\n" +
                 "🎰 /рулетка [цвет/чет] [ставка]\n" +
