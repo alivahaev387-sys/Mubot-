@@ -20,14 +20,14 @@ vk = vk_session.get_api()
 
 print("--- БОТ ЗАПУЩЕН УСПЕШНО ---")
 
-# ===== ИСПРАВЛЕННАЯ ФУНКЦИЯ ОТПРАВКИ (ДОБАВЛЕН group_id) =====
+# ===== ИСПРАВЛЕННАЯ ФУНКЦИЯ ОТПРАВКИ (ЧЕРЕЗ vk.method) =====
 def send_msg(peer_id, message, keyboard=None, reply_to=None):
     try:
         params = {
             'peer_id': peer_id, 
             'message': message, 
             'random_id': random.randint(1, 2**31 - 1),
-            'group_id': GROUP_ID, # БЕЗ ЭТОГО РЕПЛАЙ В БЕСЕДАХ НЕ РАБОТАЕТ
+            'group_id': GROUP_ID,
             'disable_mentions': 1 
         }
         if keyboard: 
@@ -35,7 +35,8 @@ def send_msg(peer_id, message, keyboard=None, reply_to=None):
         if reply_to: 
             params['reply_to'] = int(reply_to) # ВК требует int
             
-        return vk.messages.send(**params)
+        # ИСПОЛЬЗУЕМ vk.method, ЧТОБЫ vk_api НЕ ВЫРЕЗАЛ ПАРАМЕТРЫ
+        return vk.method('messages.send', params)
     except Exception as e:
         print(f"Ошибка отправки: {e}")
 
