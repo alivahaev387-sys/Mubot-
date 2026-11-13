@@ -14,20 +14,36 @@ if not os.path.exists(DATA_DIR):
     os.makedirs(DATA_DIR)
 DB_FILE = os.path.join(DATA_DIR, "game.db")
 
-# Инициализация ВК с версией 5.199 для карусели и кнопок
 vk_session = vk_api.VkApi(token=TOKEN, api_version='5.199')
 longpoll = VkBotLongPoll(vk_session, GROUP_ID)
 vk = vk_session.get_api()
 
 print("--- БОТ ЗАПУЩЕН УСПЕШНО ---")
 
+# ===== ЖЕСТКАЯ ФУНКЦИЯ ОТПРАВКИ С РЕПЛАЕМ =====
+def send_msg(peer_id, message, keyboard=None, reply_to=None):
+    try:
+        params = {
+            'peer_id': peer_id, 
+            'message': message, 
+            'random_id': random.randint(1, 2**31 - 1),
+            'disable_mentions': 1 
+        }
+        if keyboard: 
+            params['keyboard'] = keyboard
+        if reply_to: 
+            params['reply_to'] = int(reply_to) # ВК требует int
+            
+        return vk.messages.send(**params)
+    except Exception as e:
+        print(f"Ошибка отправки: {e}")
+
 # ===== БАЗА ДАННЫХ =====
 def get_db():
     return sqlite3.connect(DB_FILE, timeout=15, check_same_thread=False)
 
 def init_db():
-    conn = get_db()
-    c = conn.cursor()
+    conn = get_db(); c = conn.cursor()
     c.execute("CREATE TABLE IF NOT EXISTS users (user_id TEXT PRIMARY KEY, balance INTEGER DEFAULT 1000000, rep INTEGER DEFAULT 0)")
     c.execute("CREATE TABLE IF NOT EXISTS active_duels (msg_id TEXT PRIMARY KEY, challenger TEXT, bet INTEGER, peer_id TEXT)")
     c.execute("CREATE TABLE IF NOT EXISTS bonus_cd (user_id TEXT PRIMARY KEY, last_used INTEGER)")
@@ -39,14 +55,12 @@ def init_db():
     c.execute("CREATE TABLE IF NOT EXISTS activated_chats (peer_id TEXT PRIMARY KEY)")
     c.execute("CREATE TABLE IF NOT EXISTS user_businesses (user_id TEXT PRIMARY KEY, biz_id INTEGER, level INTEGER DEFAULT 1)")
     c.execute("CREATE TABLE IF NOT EXISTS rep_cooldown (user_id TEXT, target_id TEXT, last_used INTEGER, PRIMARY KEY (user_id, target_id))")
-    conn.commit()
-    conn.close()
+    conn.commit(); conn.close()
 
 init_db()
 
 def get_user(user_id):
-    conn = get_db()
-    c = conn.cursor()
+    conn = get_db(); c = conn.cursor()
     c.execute("SELECT balance, rep FROM users WHERE user_id = ?", (str(user_id),))
     row = c.fetchone()
     if not row:
@@ -60,19 +74,15 @@ def get_user(user_id):
 
 def update_balance(user_id, amount):
     bal, rep = get_user(user_id)
-    conn = get_db()
-    c = conn.cursor()
+    conn = get_db(); c = conn.cursor()
     c.execute("UPDATE users SET balance = ? WHERE user_id = ?", (bal + amount, str(user_id)))
-    conn.commit()
-    conn.close()
+    conn.commit(); conn.close()
 
 def update_rep(user_id, amount):
     bal, rep = get_user(user_id)
-    conn = get_db()
-    c = conn.cursor()
+    conn = get_db(); c = conn.cursor()
     c.execute("UPDATE users SET rep = ? WHERE user_id = ?", (rep + amount, str(user_id)))
-    conn.commit()
-    conn.close()
+    conn.commit(); conn.close()
 
 def get_name(user_id):
     try:
@@ -241,7 +251,7 @@ while True:
                 # Мафия
                 if payload.get("cmd") == "mafia_join":
                     try:
-                        vk.messages.send(peer_id=user_id, message="✅ Вы вошли в игру Мафия!", random_id=random.randint(1, 2**31))
+                        send_msg(user_id, "✅ Вы вошли в игру Мафия!")
                         vk.messages.sendMessageEventAnswer(event_id=event_id, user_id=user_id, peer_id=peer_id, event_data=json.dumps({"type": "show_snackbar", "text": "✅ Вы вошли в игру!"}))
                     except:
                         vk.messages.sendMessageEventAnswer(event_id=event_id, user_id=user_id, peer_id=peer_id, event_data=json.dumps({"type": "show_snackbar", "text": "⚠️ Напишите боту в ЛС! (Кнопка внизу)"}))
@@ -337,7 +347,7 @@ while True:
                         vk.messages.sendMessageEventAnswer(event_id=event_id, user_id=user_id, peer_id=peer_id, event_data=json.dumps({"type": "show_snackbar", "text": f"💰 Забрано: {win}$"}))
                     conn.close(); continue
 
-            # --- ОБРАБОТКА СООБЩЕНИЙ И СИСТЕМНЫХ СОБЫТИЙ ---
+            # --- ОБРАБОТКА СООБЩЕНИЙ ---
             if event.type == VkBotEventType.MESSAGE_NEW:
                 msg = event.object.message
                 user_id = msg['from_id']
@@ -345,15 +355,12 @@ while True:
                 text = msg.get('text', '').strip().lower()
                 is_ls = (peer_id == user_id)
 
-                # === ПРИВЕТСТВИЕ ПРИ ДОБАВЛЕНИИ ===
+                # Приветствие
                 if 'action' in msg and msg['action']:
                     action = msg['action']
                     if action.get('type') in ['chat_invite_user', 'chat_invite_user_by_link']:
                         if str(action.get('member_id')) == str(-GROUP_ID):
-                            try:
-                                vk.messages.send(peer_id=peer_id, message="👋 Добро пожаловать! Я официальный игровой бот Game Zone.\n\nДля активации выдайте мне права администратора и напишите /start", random_id=random.randint(1, 2**31), group_id=GROUP_ID, disable_mentions=1)
-                            except Exception as e:
-                                print("Ошибка приветствия:", e)
+                            send_msg(peer_id, "👋 Добро пожаловать! Я официальный игровой бот Game Zone.\n\nДля активации выдайте мне права администратора и напишите /start")
                             continue
 
                 if not text: continue
@@ -374,7 +381,7 @@ while True:
                     c.execute("SELECT reason FROM blacklist WHERE user_id = ?", (str(user_id),))
                     row = c.fetchone(); conn.close()
                     if row:
-                        vk.messages.send(peer_id=peer_id, message=f"🚫 Вы в ЧС. Причина: {row[0]}", random_id=random.randint(1, 2**31), reply_to=msg['id'], disable_mentions=1)
+                        send_msg(peer_id, f"🚫 Вы в ЧС. Причина: {row[0]}", reply_to=msg['id'])
                         continue
 
                 if not text.startswith('/') and text != '💼 работа': continue
@@ -383,17 +390,15 @@ while True:
                 parts = clean_text.split()
                 balance, rep = get_user(user_id)
 
-                reply_params = {"disable_mentions": 1, "reply_to": msg['id']}
-
                 # === КОМАНДЫ ===
                 if text in ["начать", "start"]:
                     if is_ls:
-                        vk.messages.send(peer_id=peer_id, message="👋 Привет! Я бот.", keyboard=get_main_kb(), random_id=random.randint(1, 2**31))
+                        send_msg(peer_id, "👋 Привет! Я бот.", keyboard=get_main_kb(), reply_to=msg['id'])
                     else:
                         conn = get_db(); c = conn.cursor()
                         c.execute("SELECT peer_id FROM activated_chats WHERE peer_id = ?", (str(peer_id),))
                         if c.fetchone():
-                            vk.messages.send(peer_id=peer_id, message="✅ Бот уже активирован! Напиши /help.", random_id=random.randint(1, 2**31), **reply_params)
+                            send_msg(peer_id, "✅ Бот уже активирован! Напиши /help.", reply_to=msg['id'])
                         else:
                             try:
                                 members = vk.messages.getConversationMembers(peer_id=peer_id)
@@ -401,54 +406,54 @@ while True:
                                 is_bot_admin = any(m['member_id'] == -GROUP_ID and m.get('is_admin') for m in members['items'])
                                 
                                 if not is_user_admin:
-                                    vk.messages.send(peer_id=peer_id, message="❌ У вас нет прав администратора.", random_id=random.randint(1, 2**31), **reply_params)
+                                    send_msg(peer_id, "❌ У вас нет прав администратора.", reply_to=msg['id'])
                                 elif not is_bot_admin:
-                                    vk.messages.send(peer_id=peer_id, message="❌ Выдайте боту права администратора.", random_id=random.randint(1, 2**31), **reply_params)
+                                    send_msg(peer_id, "❌ Выдайте боту права администратора.", reply_to=msg['id'])
                                 else:
                                     c.execute("INSERT INTO activated_chats (peer_id) VALUES (?)", (str(peer_id),))
                                     conn.commit()
-                                    vk.messages.send(peer_id=peer_id, message="✅ Бот успешно активирован! Напишите /help.", random_id=random.randint(1, 2**31), **reply_params)
+                                    send_msg(peer_id, "✅ Бот успешно активирован! Напишите /help.", reply_to=msg['id'])
                             except:
-                                vk.messages.send(peer_id=peer_id, message="⚠️ Ошибка проверки прав.", random_id=random.randint(1, 2**31), **reply_params)
+                                send_msg(peer_id, "⚠️ Ошибка проверки прав.", reply_to=msg['id'])
                         conn.close()
                     continue
 
                 if clean_text in ["help", "помощь", "команды"]:
                     help_txt = "📖 Доступные команды:\n\n🎰 /рулетка [цвет/чет] [ставка]\n🎲 /фортуна (100$)\n💣 /мины [ставка]\n⚔️ /duel [сумма]\n💸 /transfer [сумма] (ответом)\n🎁 /бонус\n🎁 /promo [код]\n📜 /промолист\n🕵️ /мафия (Игра в беседе)\n📊 /rep + / (Репутация)\n🏢 /бизнес\n👤 /профиль\n🏆 /топ"
-                    vk.messages.send(peer_id=peer_id, message=help_txt, random_id=random.randint(1, 2**31), keyboard=get_main_kb() if is_ls else None, **reply_params)
+                    send_msg(peer_id, help_txt, keyboard=get_main_kb() if is_ls else None, reply_to=msg['id'])
                     continue
 
                 if text == "💼 работа":
                     earned = random.randint(100, 500)
                     update_balance(user_id, earned)
-                    vk.messages.send(peer_id=peer_id, message=f"✅ Заработано {earned}$!", random_id=random.randint(1, 2**31), keyboard=get_main_kb(), **reply_params)
+                    send_msg(peer_id, f"✅ Заработано {earned}$!", keyboard=get_main_kb(), reply_to=msg['id'])
                     continue
 
                 if clean_text in ["профиль", "баланс"]:
-                    vk.messages.send(peer_id=peer_id, message=f"👤 Профиль:\n💰 Баланс: {fmt(balance)}$\n📊 Репутация: {rep}\n🆔 ID: {user_id}", random_id=random.randint(1, 2**31), keyboard=get_main_kb() if is_ls else None, **reply_params)
+                    send_msg(peer_id, f"👤 Профиль:\n💰 Баланс: {fmt(balance)}$\n📊 Репутация: {rep}\n🆔 ID: {user_id}", keyboard=get_main_kb() if is_ls else None, reply_to=msg['id'])
                     continue
 
                 if clean_text in ["топ", "top"]:
                     if is_ls:
-                        vk.messages.send(peer_id=peer_id, message="❌ Только в беседах!", random_id=random.randint(1, 2**31), **reply_params)
+                        send_msg(peer_id, "❌ Только в беседах!", reply_to=msg['id'])
                         continue
                     conn = get_db(); c = conn.cursor()
                     c.execute("SELECT user_id, count FROM chat_messages WHERE peer_id = ? ORDER BY count DESC LIMIT 10", (str(peer_id),))
                     rows = c.fetchall(); conn.close()
                     if not rows:
-                        vk.messages.send(peer_id=peer_id, message="🏆 Пусто.", random_id=random.randint(1, 2**31), **reply_params)
+                        send_msg(peer_id, "🏆 Пусто.", reply_to=msg['id'])
                         continue
                     top_txt = "⭐ ТОП 10 ПО СООБЩЕНИЯМ\n\n"
                     emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
                     for i, r in enumerate(rows):
                         top_txt += f"{emojis[i]} {get_name(r[0])} - {r[1]} сообщений\n"
-                    vk.messages.send(peer_id=peer_id, message=top_txt, keyboard=get_top_msg_kb(), random_id=random.randint(1, 2**31), **reply_params)
+                    send_msg(peer_id, top_txt, keyboard=get_top_msg_kb(), reply_to=msg['id'])
                     continue
 
                 if clean_text.startswith('rep'):
                     sign = parts[1] if len(parts) > 1 else None
                     if not sign or ("+" not in sign and "-" not in sign):
-                        vk.messages.send(peer_id=peer_id, message="❌ Формат: /rep + @user", random_id=random.randint(1, 2**31), **reply_params)
+                        send_msg(peer_id, "❌ Формат: /rep + @user", reply_to=msg['id'])
                         continue
                     target_id = None
                     if 'reply_message' in msg:
@@ -458,24 +463,24 @@ while True:
                         if match: target_id = int(match.group(1))
                     
                     if not target_id:
-                        vk.messages.send(peer_id=peer_id, message="❌ Ответьте или укажите @.", random_id=random.randint(1, 2**31), **reply_params)
+                        send_msg(peer_id, "❌ Ответьте или укажите @.", reply_to=msg['id'])
                         continue
                     if target_id == user_id:
-                        vk.messages.send(peer_id=peer_id, message="❌ Себе нельзя.", random_id=random.randint(1, 2**31), **reply_params)
+                        send_msg(peer_id, "❌ Себе нельзя.", reply_to=msg['id'])
                         continue
 
                     conn = get_db(); c = conn.cursor()
                     c.execute("SELECT last_used FROM rep_cooldown WHERE user_id = ? AND target_id = ?", (str(user_id), str(target_id)))
                     cd = c.fetchone()
                     if cd and time.time() - cd[0] < 86400:
-                        vk.messages.send(peer_id=peer_id, message="⏳ Вы уже меняли репутацию сегодня.", random_id=random.randint(1, 2**31), **reply_params)
+                        send_msg(peer_id, "⏳ Вы уже меняли репутацию сегодня.", reply_to=msg['id'])
                         conn.close(); continue
 
                     amount = 1 if '+' in sign else -1
                     update_rep(target_id, amount)
                     c.execute("REPLACE INTO rep_cooldown (user_id, target_id, last_used) VALUES (?, ?, ?)", (str(user_id), str(target_id), int(time.time())))
                     conn.commit(); conn.close()
-                    vk.messages.send(peer_id=peer_id, message=f"✅ Вы изменили репутацию {get_name(target_id)} на {amount}", random_id=random.randint(1, 2**31), **reply_params)
+                    send_msg(peer_id, f"✅ Вы изменили репутацию {get_name(target_id)} на {amount}", reply_to=msg['id'])
                     continue
 
                 # Бизнесы
@@ -483,7 +488,7 @@ while True:
                     conn = get_db(); c = conn.cursor()
                     c.execute("SELECT biz_id FROM user_businesses WHERE user_id = ?", (str(user_id),))
                     if c.fetchone():
-                        vk.messages.send(peer_id=peer_id, message="❌ У вас уже есть бизнес! Напишите /мой_бизнес.", random_id=random.randint(1, 2**31), **reply_params)
+                        send_msg(peer_id, "❌ У вас уже есть бизнес! Напишите /мой_бизнес.", reply_to=msg['id'])
                     else:
                         elements = []
                         for b in BIZNESSES:
@@ -498,7 +503,7 @@ while True:
                         try:
                             vk.messages.send(peer_id=peer_id, message="🏪 Магазин бизнесов 👉", template=template, random_id=random.randint(1, 2**31))
                         except:
-                            vk.messages.send(peer_id=peer_id, message="🏪 Выберите бизнес:", keyboard=get_biz_kb(), random_id=random.randint(1, 2**31), **reply_params)
+                            send_msg(peer_id, "🏪 Выберите бизнес:", keyboard=get_biz_kb(), reply_to=msg['id'])
                     conn.close(); continue
 
                 if clean_text == 'мой_бизнес':
@@ -506,19 +511,19 @@ while True:
                     c.execute("SELECT biz_id, level FROM user_businesses WHERE user_id = ?", (str(user_id),))
                     row = c.fetchone(); conn.close()
                     if not row:
-                        vk.messages.send(peer_id=peer_id, message="❌ Нет бизнеса. Напишите /бизнес.", random_id=random.randint(1, 2**31), **reply_params)
+                        send_msg(peer_id, "❌ Нет бизнеса. Напишите /бизнес.", reply_to=msg['id'])
                     else:
                         b = next((x for x in BIZNESSES if x["id"] == row[0]), None)
-                        vk.messages.send(peer_id=peer_id, message=f"🏢 {b['name']}\n💪 Уровень: {row[1]}/5\n😼 {fmt(b['income'] * row[1])}$/час", keyboard=get_my_biz_kb(), random_id=random.randint(1, 2**31), **reply_params)
+                        send_msg(peer_id, f"🏢 {b['name']}\n💪 Уровень: {row[1]}/5\n😼 {fmt(b['income'] * row[1])}$/час", keyboard=get_my_biz_kb(), reply_to=msg['id'])
                     continue
 
                 # Мафия
                 if clean_text == 'мафия':
                     if is_ls:
-                        vk.messages.send(peer_id=peer_id, message="❌ Только в беседах.", random_id=random.randint(1, 2**31), **reply_params)
+                        send_msg(peer_id, "❌ Только в беседах.", reply_to=msg['id'])
                         continue
                     host = get_name(user_id)
-                    vk.messages.send(peer_id=peer_id, message=f"🎭 МАФИЯ — регистрация\n\n👑 Ведущий: {host}\n\nНужно минимум 4 игрока. Роли придут в ЛС!", keyboard=get_mafia_kb(), random_id=random.randint(1, 2**31), **reply_params)
+                    send_msg(peer_id, f"🎭 МАФИЯ — регистрация\n\n👑 Ведущий: {host}\n\nНужно минимум 4 игрока. Роли придут в ЛС!", keyboard=get_mafia_kb(), reply_to=msg['id'])
                     continue
 
                 # Рулетка
@@ -528,19 +533,19 @@ while True:
                         bet_str = parts[-1]
                         bet = balance if bet_str in ["вб", "всё", "все"] else int(bet_str) if bet_str.isdigit() else 0
                         if bet < 10 or bet > balance:
-                            vk.messages.send(peer_id=peer_id, message=f"❌ Мин. 10, у тебя {fmt(balance)}$", random_id=random.randint(1, 2**31), **reply_params)
+                            send_msg(peer_id, f"❌ Мин. 10, у тебя {fmt(balance)}$", reply_to=msg['id'])
                             continue
                         res = random.randint(0, 36)
                         red = [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36]
                         win = (choice.isdigit() and int(choice) == res) or (choice in ["красное", "кр"] and res in red) or (choice in ["черное", "чр"] and res not in red and res != 0) or (choice in ["чет"] and res % 2 == 0 and res != 0) or (choice in ["нечет"] and res % 2 != 0)
                         if win:
                             update_balance(user_id, bet)
-                            vk.messages.send(peer_id=peer_id, message=f"🎰 Выпало: {res}. Выигрыш: +{bet}$", random_id=random.randint(1, 2**31), **reply_params)
+                            send_msg(peer_id, f"🎰 Выпало: {res}. Выигрыш: +{bet}$", reply_to=msg['id'])
                         else:
                             update_balance(user_id, -bet)
-                            vk.messages.send(peer_id=peer_id, message=f"🎰 Выпало: {res}. Проигрыш: -{bet}$", random_id=random.randint(1, 2**31), **reply_params)
+                            send_msg(peer_id, f"🎰 Выпало: {res}. Проигрыш: -{bet}$", reply_to=msg['id'])
                     else:
-                        vk.messages.send(peer_id=peer_id, message="❌ Формат: /рулетка красное 500", random_id=random.randint(1, 2**31), **reply_params)
+                        send_msg(peer_id, "❌ Формат: /рулетка красное 500", reply_to=msg['id'])
                     continue
 
                 if clean_text == 'фортуна':
@@ -548,30 +553,30 @@ while True:
                     c.execute("SELECT last_used FROM fortune_cd WHERE user_id = ?", (str(user_id),))
                     row = c.fetchone()
                     if row and time.time() - row[0] < FORTUNA_CD:
-                        vk.messages.send(peer_id=peer_id, message="⏳ Ждите.", random_id=random.randint(1, 2**31), **reply_params)
+                        send_msg(peer_id, "⏳ Ждите.", reply_to=msg['id'])
                         conn.close(); continue
                     if balance < 100:
-                        vk.messages.send(peer_id=peer_id, message="❌ Стоит 100$.", random_id=random.randint(1, 2**31), **reply_params)
+                        send_msg(peer_id, "❌ Стоит 100$.", reply_to=msg['id'])
                         conn.close(); continue
                     update_balance(user_id, -100)
                     c.execute("REPLACE INTO fortune_cd (user_id, last_used) VALUES (?, ?)", (str(user_id), int(time.time())))
                     conn.commit(); conn.close()
                     prize = random.choice([0, 50, 100, 200, 500, 1000, 5000])
                     update_balance(user_id, prize)
-                    vk.messages.send(peer_id=peer_id, message=f"🎰 Выпало: {fmt(prize)}$!", random_id=random.randint(1, 2**31), **reply_params)
+                    send_msg(peer_id, f"🎰 Выпало: {fmt(prize)}$!", reply_to=msg['id'])
                     continue
 
                 if clean_text.startswith('мины'):
                     bet = 100
                     if len(parts) >= 2 and parts[1].isdigit(): bet = int(parts[1])
                     if bet < 10 or bet > balance:
-                        vk.messages.send(peer_id=peer_id, message="❌ Мин. 10", random_id=random.randint(1, 2**31), **reply_params)
+                        send_msg(peer_id, "❌ Мин. 10", reply_to=msg['id'])
                         continue
                     game_id = str(random.randint(10000, 99999))
                     conn = get_db(); c = conn.cursor()
                     c.execute("INSERT INTO games (game_id, user_id, bet, mines, opened, multiplier, msg_id) VALUES (?, ?, ?, '[]', '[]', 1.0, ?)", (game_id, str(user_id), bet, str(msg['id'])))
                     conn.commit(); conn.close()
-                    vk.messages.send(peer_id=peer_id, message=f"💣 Мины\nСтавка: {bet}$\nВыберите кол-во мин:", keyboard=get_mines_count_kb(game_id), random_id=random.randint(1, 2**31), **reply_params)
+                    send_msg(peer_id, f"💣 Мины\nСтавка: {bet}$\nВыберите кол-во мин:", keyboard=get_mines_count_kb(game_id), reply_to=msg['id'])
                     continue
 
                 if clean_text == 'бонус':
@@ -579,13 +584,13 @@ while True:
                     c.execute("SELECT last_used FROM bonus_cd WHERE user_id = ?", (str(user_id),))
                     row = c.fetchone()
                     if row and time.time() - row[0] < BONUS_CD:
-                        vk.messages.send(peer_id=peer_id, message="⏳ Ждите.", random_id=random.randint(1, 2**31), **reply_params)
+                        send_msg(peer_id, "⏳ Ждите.", reply_to=msg['id'])
                         conn.close(); continue
                     amount = random.choice([100000, 200000, 500000])
                     update_balance(user_id, amount)
                     c.execute("REPLACE INTO bonus_cd (user_id, last_used) VALUES (?, ?)", (str(user_id), int(time.time())))
                     conn.commit(); conn.close()
-                    vk.messages.send(peer_id=peer_id, message=f"🎁 Бонус: +{fmt(amount)}$", random_id=random.randint(1, 2**31), **reply_params)
+                    send_msg(peer_id, f"🎁 Бонус: +{fmt(amount)}$", reply_to=msg['id'])
                     continue
 
                 # ===== АДМИНКА =====
@@ -595,11 +600,11 @@ while True:
                         if target_id and not is_ls:
                             try:
                                 vk.messages.removeChatUser(chat_id=peer_id-2000000000, user_id=target_id, group_id=GROUP_ID)
-                                vk.messages.send(peer_id=peer_id, message="✅ Исключен.", random_id=random.randint(1, 2**31), **reply_params)
+                                send_msg(peer_id, "✅ Исключен.", reply_to=msg['id'])
                             except:
-                                vk.messages.send(peer_id=peer_id, message="⚠️ Ошибка.", random_id=random.randint(1, 2**31), **reply_params)
+                                send_msg(peer_id, "⚠️ Ошибка.", reply_to=msg['id'])
                         else:
-                            vk.messages.send(peer_id=peer_id, message="⚠️ Ответьте на сообщение.", random_id=random.randint(1, 2**31), **reply_params)
+                            send_msg(peer_id, "⚠️ Ответьте на сообщение.", reply_to=msg['id'])
                         continue
                         
                     if clean_text.startswith('чсб'):
@@ -609,16 +614,18 @@ while True:
                             conn = get_db(); c = conn.cursor()
                             c.execute("REPLACE INTO blacklist (user_id, reason) VALUES (?, ?)", (str(target_id), reason))
                             conn.commit(); conn.close()
-                            vk.messages.send(peer_id=peer_id, message=f"✅ Пользователь в ЧС.", random_id=random.randint(1, 2**31), **reply_params)
+                            send_msg(peer_id, f"✅ Пользователь в ЧС.", reply_to=msg['id'])
                         else:
-                            vk.messages.send(peer_id=peer_id, message="⚠️ Ответьте на сообщение.", random_id=random.randint(1, 2**31), **reply_params)
+                            send_msg(peer_id, "⚠️ Ответьте на сообщение.", reply_to=msg['id'])
                         continue
                         
                     if clean_text.startswith('деньги'):
                         if len(parts) == 2 and parts[1].isdigit() and 'reply_message' in msg:
                             target_id = msg['reply_message']['from_id']
                             update_balance(target_id, int(parts[1]))
-                            vk.messages.send(peer_id=peer_id, message="✅ Выдано.", random_id=random.randint(1, 2**31), **reply_params)
+                            send_msg(peer_id, f"✅ Выдано {parts[1]}$ игроку {get_name(target_id)}", reply_to=msg['id'])
+                        else:
+                            send_msg(peer_id, "❌ Формат: /деньги [сумма] (ответом на сообщение)", reply_to=msg['id'])
                         continue
                         
                     if clean_text.startswith('создать'):
@@ -626,14 +633,14 @@ while True:
                             conn = get_db(); c = conn.cursor()
                             c.execute("REPLACE INTO promos (code, amount, limit_count, used_by) VALUES (?, ?, ?, '')", (parts[1], int(parts[2]), int(parts[3])))
                             conn.commit(); conn.close()
-                            vk.messages.send(peer_id=peer_id, message="✅ Промокод создан.", random_id=random.randint(1, 2**31), **reply_params)
+                            send_msg(peer_id, "✅ Промокод создан.", reply_to=msg['id'])
                         continue
                         
                     if clean_text == 'cp':
                         conn = get_db(); c = conn.cursor()
                         c.execute("DELETE FROM promos")
                         conn.commit(); conn.close()
-                        vk.messages.send(peer_id=peer_id, message="✅ Промо удалены.", random_id=random.randint(1, 2**31), **reply_params)
+                        send_msg(peer_id, "✅ Промо удалены.", reply_to=msg['id'])
                         continue
 
                 if clean_text == 'промолист':
@@ -641,10 +648,10 @@ while True:
                     c.execute("SELECT code, amount FROM promos")
                     rows = c.fetchall(); conn.close()
                     if not rows:
-                        vk.messages.send(peer_id=peer_id, message="❌ Пусто.", random_id=random.randint(1, 2**31), **reply_params)
+                        send_msg(peer_id, "❌ Пусто.", reply_to=msg['id'])
                     else:
                         txt = "🎁 Промокоды:\n\n" + "\n".join([f"▪️ {r[0]} — {r[1]}$" for r in rows])
-                        vk.messages.send(peer_id=peer_id, message=txt, random_id=random.randint(1, 2**31), **reply_params)
+                        send_msg(peer_id, txt, reply_to=msg['id'])
                     continue
 
                 if clean_text.startswith('promo'):
@@ -653,18 +660,18 @@ while True:
                         c.execute("SELECT amount, limit_count, used_by FROM promos WHERE code = ?", (parts[1],))
                         row = c.fetchone()
                         if not row:
-                            vk.messages.send(peer_id=peer_id, message="❌ Неверный код.", random_id=random.randint(1, 2**31), **reply_params)
+                            send_msg(peer_id, "❌ Неверный код.", reply_to=msg['id'])
                             conn.close(); continue
                         amount, limit, used_by_str = row
                         used_by = used_by_str.split(",") if used_by_str else []
                         if str(user_id) in used_by:
-                            vk.messages.send(peer_id=peer_id, message="❌ Вы уже активировали.", random_id=random.randint(1, 2**31), **reply_params)
+                            send_msg(peer_id, "❌ Вы уже активировали.", reply_to=msg['id'])
                             conn.close(); continue
                         used_by.append(str(user_id))
                         c.execute("UPDATE promos SET used_by = ? WHERE code = ?", (",".join(used_by), parts[1]))
                         conn.commit()
                         update_balance(user_id, amount)
-                        vk.messages.send(peer_id=peer_id, message=f"✅ Активирован! +{amount}$", random_id=random.randint(1, 2**31), **reply_params)
+                        send_msg(peer_id, f"✅ Активирован! +{amount}$", reply_to=msg['id'])
                         conn.close()
                     continue
 
