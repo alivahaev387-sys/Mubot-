@@ -822,22 +822,16 @@ vk.updates.on('message_event', async (context) => {
 
                 await updateBalance(userId, totalBalance);
                 await dbRun("UPDATE businesses SET balance = 0, last_income = ? WHERE user_id = ?", [Date.now(), String(userId)]);
+                
+                // Показываем только всплывающее окошко. Никаких сообщений в чат!
+                await context.answer({ type: 'show_snackbar', text: `💸 Вы вывели ${formatMoney(totalBalance)}$` });
 
-                // Отправляем сообщение в чат (как на скрине)
-                await vk.api.messages.send({
-                    peer_id: context.peerId,
-                    message: `💸 Вы вывели ${formatMoney(totalBalance)}$`,
-                    random_id: Math.floor(Math.random() * 1000000000),
-                    disable_mentions: 1
-                });
-
-                // Пытаемся отредактировать сообщение, чтобы обнулить баланс
                 const newMsgText = `🏢 Бизнес ${await getFullName(userId)}\n${biz.biz_name}\n\n💪 Уровень: ${biz.level}/5\n🐱 ${formatMoney(bizData.baseIncome * biz.level * 20)}$/час\n💸 На балансе бизнеса: 0$\n\nБизнес работает только 4 часа! Чтобы опять стал работать нужно вывести $$$`;
                 
                 try {
                     await context.editMessage({ message: newMsgText, keyboard: getBizKb(userId), disable_mentions: 1 });
                 } catch(e) {
-                    // Игнорируем ошибку, если сообщение слишком старое
+                    // Игнорируем ошибку (если сообщение слишком старое)
                 }
                 return;
             }
