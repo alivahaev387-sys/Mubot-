@@ -14,9 +14,10 @@ const ADMIN_ID = 200005093141;
 const BONUS_CD = 600; 
 const FORTUNA_CD = 600;
 
+// ОБНОВИЛИ ВЕРСИЮ ДЛЯ СТАБИЛЬНЫХ СОБЫТИЙ
 const vk = new VK({ 
     token: TOKEN, 
-    apiVersion: '5.131',
+    apiVersion: '5.199',
     pollingGroupId: GROUP_ID 
 });
 
@@ -176,9 +177,11 @@ vk.updates.on('message_new', async (message) => {
         // НОВОЕ: ПРИВЕТСТВИЕ ПРИ ДОБАВЛЕНИИ В БЕСЕДУ
         if (message.action) {
             const action = message.action;
+            console.log(`[СОБЫТИЕ В БЕСЕДЕ] Тип: ${action.type}, member_id: ${action.member_id}`);
+            
             if (action.type === 'chat_invite_user' || action.type === 'chat_invite_user_by_link') {
-                // Проверяем, добавили ли именно нашего бота (у ботов ID отрицательный)
-                if (Math.abs(action.member_id) === GROUP_ID) {
+                // Проверяем, добавили ли именно нашего бота (сравниваем строки на всякий случай)
+                if (String(action.member_id) === String(-GROUP_ID)) {
                     const actKb = Keyboard.builder().inline().callbackButton({
                         label: '🚀 Активировать',
                         payload: { cmd: 'activate_bot' },
@@ -479,7 +482,7 @@ vk.updates.on('message_new', async (message) => {
         if (cleanText.startsWith('promo')) {
             if (parts.length === 2) {
                 
-                // НОВОЕ: ПРОВЕРКА НА ПОДПИСКУ
+                // ПРОВЕРКА НА ПОДПИСКУ
                 try {
                     const isMember = await vk.api.groups.isMember({ group_id: GROUP_ID, user_id: userId });
                     if (isMember !== 1) {
@@ -536,29 +539,25 @@ vk.updates.on('message_event', async (context) => {
         const payload = context.eventPayload;
         const userId = context.userId;
         
-        // НОВОЕ: ОБРАБОТКА КНОПКИ "АКТИВИРОВАТЬ"
+        // ОБРАБОТКА КНОПКИ "АКТИВИРОВАТЬ"
         if (payload.cmd === 'activate_bot') {
             try {
                 const members = await vk.api.messages.getConversationMembers({ peer_id: context.peerId });
                 
-                // Ищем того, кто нажал, и ищем бота
                 const member = members.items.find(m => m.member_id == context.userId);
                 const bot = members.items.find(m => m.member_id == -GROUP_ID || m.member_id == GROUP_ID);
 
                 const isUserAdmin = member && (member.is_admin || member.is_owner);
                 const isBotAdmin = bot && bot.is_admin;
 
-                // Если нажал не админ беседы
                 if (!isUserAdmin) {
                     return await context.answer({ type: 'show_snackbar', text: '❌ У вас нет прав для активации бота!' });
                 }
 
-                // Если нажал админ, но боту не дали админку
                 if (!isBotAdmin) {
                     return await context.answer({ type: 'show_snackbar', text: '❌ Ошибка бот не является администратором' });
                 }
 
-                // Всё успешно
                 await context.answer({ type: 'show_snackbar', text: '✅ Бот успешно активирован!' });
                 await context.editMessage({ message: "✅ Бот успешно активирован и готов к работе!\n\nНапишите /help, чтобы увидеть список команд.", keyboard: null });
                 return;
