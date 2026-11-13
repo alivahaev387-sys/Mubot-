@@ -14,7 +14,6 @@ const ADMIN_ID = 200005093141;
 const BONUS_CD = 600; 
 const FORTUNA_CD = 600;
 
-// ОБНОВИЛИ ВЕРСИЮ ДЛЯ СТАБИЛЬНЫХ СОБЫТИЙ
 const vk = new VK({ 
     token: TOKEN, 
     apiVersion: '5.199',
@@ -174,20 +173,27 @@ vk.updates.on('message_new', async (message) => {
     if (message.senderId < 0) return;
 
     try {
-        // НОВОЕ: ПРИВЕТСТВИЕ ПРИ ДОБАВЛЕНИИ В БЕСЕДУ
+        // ПРИВЕТСТВИЕ ПРИ ДОБАВЛЕНИИ В БЕСЕДУ
         if (message.action) {
             const action = message.action;
             console.log(`[СОБЫТИЕ В БЕСЕДЕ] Тип: ${action.type}, member_id: ${action.member_id}`);
             
             if (action.type === 'chat_invite_user' || action.type === 'chat_invite_user_by_link') {
-                // Проверяем, добавили ли именно нашего бота (сравниваем строки на всякий случай)
                 if (String(action.member_id) === String(-GROUP_ID)) {
                     const actKb = Keyboard.builder().inline().callbackButton({
                         label: '🚀 Активировать',
                         payload: { cmd: 'activate_bot' },
                         color: Keyboard.POSITIVE_COLOR
                     });
-                    return await message.reply("👋 Добро пожаловать! Я официальный игровой бот Game Zone.\n\nДля начала работы выдайте мне администратора и напишите /help.\n\nВнизу нажмите кнопку для активации:", { keyboard: actKb.toString(), disable_mentions: 1 });
+                    
+                    // ИСПРАВЛЕНИЕ: Отправляем напрямую через API, без reply, так как системное сообщение нельзя цитировать
+                    return await vk.api.messages.send({
+                        peer_id: message.peerId,
+                        message: "👋 Добро пожаловать! Я официальный игровой бот Game Zone.\n\nДля начала работы выдайте мне администратора и напишите /help.\n\nВнизу нажмите кнопку для активации:",
+                        keyboard: actKb.toString(),
+                        random_id: Math.floor(Math.random() * 1000000000),
+                        disable_mentions: 1
+                    });
                 }
             }
         }
