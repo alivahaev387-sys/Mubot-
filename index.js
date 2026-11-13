@@ -67,7 +67,6 @@ async function getFullName(userId) {
 
 function formatMoney(num) { return num.toLocaleString('ru-RU'); }
 
-// Умный парсинг для админ-команд
 async function getTargetAndReason(message, cmdName) {
     let targetId = null;
     let text = message.text;
@@ -168,13 +167,13 @@ const getTopCoinsKb = () => Keyboard.builder().inline().callbackButton({
 }).toString();
 
 // ===== ОБРАБОТКА СООБЩЕНИЙ =====
-// ВАЖНО: Используем 'message', чтобы ловить системные события (out: 1)
-vk.updates.on('message', async (message) => {
+vk.updates.on('message_new', async (message) => {
     try {
-        // ===== ПЕРВЫМ ДЕЛОМ ЛОВИМ ДОБАВЛЕНИЕ В БЕСЕДУ =====
-        if (message.action) {
-            const action = message.action;
-            
+        // ===== ПРИВЕТСТВИЕ ПРИ ДОБАВЛЕНИИ =====
+        // Извлекаем action из всех возможных мест, чтобы точно поймать
+        const action = message.action || (message.raw && message.raw.action) || (message.object && message.object.action);
+
+        if (action) {
             if (action.type === 'chat_invite_user' || action.type === 'chat_invite_user_by_link') {
                 if (String(action.member_id) === String(-GROUP_ID)) {
                     const actKb = Keyboard.builder().inline()
@@ -182,20 +181,20 @@ vk.updates.on('message', async (message) => {
                         .callbackButton({ label: 'Не активировать', payload: { cmd: 'decline_bot' }, color: Keyboard.NEGATIVE_COLOR });
                     
                     try {
-                        console.log(`[ПРИВЕТСТВИЕ] Попытка отправки в ${message.peerId}...`);
+                        console.log(`[ПРИВЕТСТВИЕ] Пытаюсь отправить в ${message.peerId}...`);
                         await vk.api.messages.send({
                             peer_id: message.peerId,
                             message: "📢 В данной беседе уже имеются сохранённые настройки, вы хотите чтобы я активировал их?",
                             keyboard: actKb.toString(),
                             random_id: Math.floor(Math.random() * 1000000000),
-                            group_id: GROUP_ID, // Жестко указываем ID группы
+                            group_id: GROUP_ID, 
                             disable_mentions: 1
                         });
                         console.log(`[ПРИВЕТСТВИЕ] Успешно отправлено!`);
                     } catch (err) {
                         console.error(`[ОШИБКА ПРИВЕТСТВИЯ]`, err);
                     }
-                    return; 
+                    return; // Выходим, чтобы не выполнять команды дальше
                 }
             }
         }
@@ -207,7 +206,7 @@ vk.updates.on('message', async (message) => {
         const text = message.text ? message.text.trim().toLowerCase() : '';
         if (!text) return;
 
-        // Счетчик сообщений (только беседы)
+        // Счетчик сообщений
         if (message.isChat) {
             const existing = await dbGet("SELECT count FROM chat_messages WHERE peer_id = ? AND user_id = ?", [String(message.peerId), String(message.senderId)]);
             if (existing) {
