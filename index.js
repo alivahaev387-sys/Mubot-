@@ -8,7 +8,7 @@ console.log("ВЕРСИЯ NODE.JS:", process.version);
 console.log("=========================================");
 
 // ===== НАСТРОЙКИ =====
-const TOKEN = "vk1.a.BvMZnZvhxLsOu5bIQ1IUIIoYMEW3T88NqEAcRZ17Yj-T46O-viFXkUPWky-4XBwNZAKsWhcwqAt3TDMqQmcKva0ckucYDEUvFKa_p_LJ9ig-zNIPv7cHSZV9KP4S8XLgO0m32YWDLuqfz-rqgrrhoFKZ0mexTvf71NQ5G1JVI0H7QtuL4HGdtQkAvT7Up8xnC-vaO3QTue9x8V5a3u1-DuwMwEXIvfB4OgnVo0_FXGI";
+const TOKEN = "vk1.a.K6H21Ezx3iiNIiHM5Xe8LiL_Uto5Q3UBixGMIdGETKmStwhfTmUmjad9K2YMVptEipNk0chqVadrmScyl5uISAYcI6IUfqaj8UlW25bo7ZwLxhQIsQ4sX6vJx8_wD1y2ZtJe-aaX4egzHx8YMFQ2gvObMiqfEUCS5PqYHPXXNigRJ6m0EAiatL6xWwjIJRaRTcPVo_hYGRad1TOz8anPJLzl4VJUem7AE3I_QwzYUVY";
 const GROUP_ID = 243089386;
 const ADMIN_ID = 200005093141;
 const BONUS_CD = 600; 
