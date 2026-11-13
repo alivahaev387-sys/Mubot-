@@ -15,7 +15,7 @@ const BONUS_CD = 600;
 const FORTUNA_CD = 600;
 
 // Настройки награды за комментарии
-const REWARD_POST_ID = 3; // ID твоего поста
+const REWARD_POST_ID = 3; 
 const REWARD_AMOUNT = 2000000;
 
 const vk = new VK({ 
@@ -34,7 +34,7 @@ const dbRun = (query, params = []) => new Promise((res, rej) => db.run(query, pa
 const dbGet = (query, params = []) => new Promise((res, rej) => db.get(query, params, (e, r) => e ? rej(e) : res(r)));
 const dbAll = (query, params = []) => new Promise((res, rej) => db.all(query, params, (e, r) => e ? rej(e) : res(r)));
 
-// Временные состояния (для репортов и ответов)
+// Временные состояния
 const tempStates = new Map();
 
 // Данные бизнесов
@@ -133,7 +133,6 @@ function formatMoney(num) {
     return n.toLocaleString('ru-RU'); 
 }
 
-// ===== УЛУЧШЕННЫЙ ПАРСЕР УПОМИНАНИЙ И ССЫЛОК =====
 async function getTargetAndReason(message, cmdName) {
     let targetId = null;
     let text = message.text || '';
@@ -142,19 +141,16 @@ async function getTargetAndReason(message, cmdName) {
     if (message.hasReplyMessage) {
         targetId = message.replyMessage.senderId;
     } else {
-        // 1. [id123|Name]
         const idMatch = reason.match(/\[id(\d+)\|[^\]]+\]/i);
         if (idMatch) {
             targetId = parseInt(idMatch[1]);
             reason = reason.replace(idMatch[0], ''); 
         } else {
-            // 2. @id123
             const atIdMatch = reason.match(/@id(\d+)/i);
             if (atIdMatch) {
                 targetId = parseInt(atIdMatch[1]);
                 reason = reason.replace(atIdMatch[0], ''); 
             } else {
-                // 3. Ссылка (vk.com/username или vk.ru/username)
                 const urlMatch = reason.match(/(?:https?:\/\/)?(?:vk\.com|vk\.ru)\/([a-zA-Z0-9._]+)/i);
                 if (urlMatch) {
                     try {
@@ -163,7 +159,6 @@ async function getTargetAndReason(message, cmdName) {
                     } catch (e) {}
                     reason = reason.replace(urlMatch[0], ''); 
                 } else {
-                    // 4. @username
                     const mentionMatch = reason.match(/@([a-zA-Z0-9._]+)/i);
                     if (mentionMatch) {
                         try {
@@ -832,6 +827,84 @@ vk.updates.on('message_new', async (message) => {
                 return await message.reply(`${senderName} разбанил(-а) пользователя ${targetName} в ЧС бота.`, replyParams());
             }
 
+            // --- КОМАНДА ВЫДАТЬ ---
+            if (cleanText.startsWith('выдать')) {
+                const args = message.text.split(' ');
+                args.shift(); // убираем саму команду
+
+                let amount = 0;
+                let remainingArgs = [];
+                
+                for (const arg of args) {
+                    const parsed = parseAmount(arg);
+                    if (parsed > 0 && parsed !== 'ALL') {
+                        amount = parsed;
+                    } else {
+                        remainingArgs.push(arg);
+                    }
+                }
+
+                if (amount <= 0) return await message.reply("❌ Укажите корректную сумму для выдачи.", replyParams());
+
+                const targetQuery = remainingArgs.join(' ').trim().toLowerCase();
+
+                if (targetQuery === 'all' || targetQuery === 'все' || targetQuery === 'всем') {
+                    await dbRun("UPDATE users SET balance = balance + ?", [amount]);
+                    return await message.reply(`💰 Владелец выдал всем игрокам по ${formatMoney(amount)}$!`, replyParams());
+                } else {
+                    let targetId = null;
+                    if (message.hasReplyMessage) {
+                        targetId = message.replyMessage.senderId;
+                    } else if (targetQuery) {
+                        const mentionMatch = targetQuery.match(/@([a-zA-Z0-9._]+)/i) || targetQuery.match(/\[id(\d+)\|/);
+                        const urlMatch = targetQuery.match(/(?:https?:\/\/)?(?:vk\.com|vk\.ru)\/([a-zA-Z0-9._]+)/i);
+                        
+                        if (mentionMatch) {
+                            if (mentionMatch[1].match(/^\d+$/)) targetId = parseInt(mentionMatch[1]);
+                            else {
+                                try {
+                                    const res = await vk.api.utils.resolveScreenName({ screen_name: mentionMatch[1] });
+                                    if (res.type === 'user') targetId = res.object_id;
+                                } catch (e) {}
+                            }
+                        } else if (urlMatch) {
+                            try {
+                                const res = await vk.api.utils.resolveScreenName({ screen_name: urlMatch[1] });
+                                if (res.type === 'user') targetId = res.object_id;
+                            } catch (e) {}
+                        }
+                    }
+
+                    if (!targetId) return await message.reply("⚠️ Укажите пользователя (ответом, @упоминанием или ссылкой) или напишите 'all'.", replyParams());
+                    
+                    await updateBalance(targetId, amount);
+                    const targetName = await getFullName(targetId);
+                    return await message.reply(`💰 Владелец выдал ${formatMoney(amount)}$ игроку ${targetName}!`, replyParams());
+                }
+            }
+
+            // --- КОМАНДА ОБНУЛИТЬ ---
+            if (cleanText.startsWith('обнулить')) {
+                const args = message.text.split(' ');
+                args.shift(); 
+                const targetQuery = args.join(' ').trim().toLowerCase();
+
+                if (targetQuery === 'all') {
+                    await dbRun("UPDATE users SET balance = 0");
+                    await dbRun("UPDATE businesses SET balance = 0");
+                    return await message.reply("💥 Балансы ВСЕХ игроков и их бизнесов успешно обнулены!", replyParams());
+                } else {
+                    const { targetId } = await getTargetAndReason(message, 'обнулить');
+                    if (!targetId) return await message.reply("⚠️ Укажите 'all', ссылку на пользователя или ответьте на его сообщение.", replyParams());
+                    
+                    await dbRun("UPDATE users SET balance = 0 WHERE user_id = ?", [String(targetId)]);
+                    await dbRun("UPDATE businesses SET balance = 0 WHERE user_id = ?", [String(targetId)]);
+                    
+                    const targetName = await getFullName(targetId);
+                    return await message.reply(`💥 Баланс игрока ${targetName} и его бизнеса успешно обнулен!`, replyParams());
+                }
+            }
+
             if (cleanText === 'cp') {
                 await dbRun("DELETE FROM promos");
                 return await message.reply("✅ Все активные промокоды были успешно удалены.", replyParams());
@@ -926,6 +999,9 @@ vk.updates.on('message_event', async (context) => {
         const payload = context.eventPayload;
         const userId = context.userId;
         
+        // --- ОПТИМИЗАЦИЯ: СРАЗУ УБИРАЕМ ЗАГРУЗКУ, ЧТОБЫ НЕ ЛАГАЛО ---
+        await context.answer(); 
+
         if (payload.cmd === 'work_menu') {
             await context.editMessage({ message: "💼 Выберите работу:", keyboard: getWorkKb() });
             return;
@@ -950,7 +1026,7 @@ vk.updates.on('message_event', async (context) => {
                 const remaining = 3600000 - (now - lastReset);
                 const m = Math.floor(remaining / 60000);
                 const s = Math.floor((remaining % 60000) / 1000);
-                return await context.answer({ type: 'show_snackbar', text: `⏳ Вы отработали 3 раза. Ждите ${m} мин. ${s} сек.` });
+                return await vk.api.messages.sendMessageEventAnswer({ event_id: context.eventId, user_id: userId, peer_id: context.peerId, event_data: JSON.stringify({ type: 'show_snackbar', text: `⏳ Вы отработали 3 раза. Ждите ${m} мин. ${s} сек.` }) });
             }
 
             count++;
@@ -974,7 +1050,7 @@ vk.updates.on('message_event', async (context) => {
                 message: `${msgText}\n\n💰 Ваш баланс: ${formatMoney(newBal)}$\n📊 Осталось попыток: ${3 - count}/3`, 
                 keyboard: getWorkKb() 
             });
-            return await context.answer({ type: 'show_snackbar', text: isLucky ? '✅ Удача!' : '😢 Не повезло...' });
+            return;
         }
 
         if (payload.cmd === 'report_contact') {
@@ -997,8 +1073,7 @@ vk.updates.on('message_event', async (context) => {
         }
         if (payload.cmd === 'rep_reply') {
             tempStates.set(ADMIN_ID, { action: 'replying', targetId: payload.uid });
-            await context.answer({ type: 'show_snackbar', text: 'Напишите текст ответа следующим сообщением.' });
-            return;
+            return await vk.api.messages.sendMessageEventAnswer({ event_id: context.eventId, user_id: userId, peer_id: context.peerId, event_data: JSON.stringify({ type: 'show_snackbar', text: 'Напишите текст ответа следующим сообщением.' }) });
         }
 
         if (payload.cmd === 'activate_bot' || payload.cmd === 'decline_bot') {
@@ -1008,31 +1083,29 @@ vk.updates.on('message_event', async (context) => {
                 const isClickerAdmin = clicker && (clicker.is_admin || clicker.is_owner);
                 
                 if (!isClickerAdmin && userId !== ADMIN_ID) {
-                    return await context.answer({ type: 'show_snackbar', text: '❌ Только администраторы беседы могут это сделать!' });
+                    return await vk.api.messages.sendMessageEventAnswer({ event_id: context.eventId, user_id: userId, peer_id: context.peerId, event_data: JSON.stringify({ type: 'show_snackbar', text: '❌ Только администраторы беседы могут это сделать!' }) });
                 }
 
                 const bot = members.items.find(m => m.member_id == -GROUP_ID || m.member_id == GROUP_ID);
                 const isBotAdmin = bot && bot.is_admin;
 
                 if (payload.cmd === 'activate_bot') {
-                    if (!isBotAdmin) return await context.answer({ type: 'show_snackbar', text: '❌ Ошибка. Убедитесь, что бот владеет статусом администратора.' });
-                    await context.answer({ type: 'show_snackbar', text: '✅ Бот успешно активирован!' });
+                    if (!isBotAdmin) return await vk.api.messages.sendMessageEventAnswer({ event_id: context.eventId, user_id: userId, peer_id: context.peerId, event_data: JSON.stringify({ type: 'show_snackbar', text: '❌ Ошибка. Убедитесь, что бот владеет статусом администратора.' }) });
                     await context.editMessage({ message: "🎉 Вы подключили бота к беседе!\nЧтобы узнать подробности напишите /help", disable_mentions: 1 });
                 } else {
-                    await context.answer({ type: 'show_snackbar', text: 'Активация отменена.' });
                     await context.editMessage({ message: "❌ Активация отменена. Чтобы начать работу, добавьте бота заново.", disable_mentions: 1 });
                 }
                 return;
             } catch (e) {
-                return await context.answer({ type: 'show_snackbar', text: '❌ Ошибка при проверке прав.' });
+                return await vk.api.messages.sendMessageEventAnswer({ event_id: context.eventId, user_id: userId, peer_id: context.peerId, event_data: JSON.stringify({ type: 'show_snackbar', text: '❌ Ошибка при проверке прав.' }) });
             }
         }
 
         if (payload.cmd === 'biz_upgrade') {
-            if (String(context.userId) !== String(payload.author)) return await context.answer({ type: 'show_snackbar', text: '❌ Это не ваш бизнес!' });
+            if (String(context.userId) !== String(payload.author)) return await vk.api.messages.sendMessageEventAnswer({ event_id: context.eventId, user_id: userId, peer_id: context.peerId, event_data: JSON.stringify({ type: 'show_snackbar', text: '❌ Это не ваш бизнес!' }) });
             
             const biz = await dbGet("SELECT * FROM businesses WHERE user_id = ?", [String(userId)]);
-            if (!biz) return await context.answer({ type: 'show_snackbar', text: '❌ У вас нет бизнеса.' });
+            if (!biz) return await vk.api.messages.sendMessageEventAnswer({ event_id: context.eventId, user_id: userId, peer_id: context.peerId, event_data: JSON.stringify({ type: 'show_snackbar', text: '❌ У вас нет бизнеса.' }) });
 
             const bizData = Object.values(BIZ_DATA).find(b => b.name === biz.biz_name) || { name: biz.biz_name, baseIncome: 1000 };
             const timePassed = Date.now() - biz.last_income;
@@ -1041,12 +1114,11 @@ vk.updates.on('message_event', async (context) => {
             const nextLevelCost = (Number(biz.level) === 1 ? 2000000 : Number(biz.level) === 2 ? 5000000 : Number(biz.level) * 5000000);
 
             const userBal = await getBalance(userId);
-            if (biz.level >= 5) return await context.answer({ type: 'show_snackbar', text: '❌ Максимальный уровень!' });
-            if (userBal < nextLevelCost) return await context.answer({ type: 'show_snackbar', text: '❌ Не хватает денег на балансе!' });
+            if (biz.level >= 5) return await vk.api.messages.sendMessageEventAnswer({ event_id: context.eventId, user_id: userId, peer_id: context.peerId, event_data: JSON.stringify({ type: 'show_snackbar', text: '❌ Максимальный уровень!' }) });
+            if (userBal < nextLevelCost) return await vk.api.messages.sendMessageEventAnswer({ event_id: context.eventId, user_id: userId, peer_id: context.peerId, event_data: JSON.stringify({ type: 'show_snackbar', text: '❌ Не хватает денег на балансе!' }) });
 
             await updateBalance(userId, -nextLevelCost);
             await dbRun("UPDATE businesses SET level = level + 1, balance = ?, last_income = ? WHERE user_id = ?", [totalBalance, Date.now(), String(userId)]);
-            await context.answer({ type: 'show_snackbar', text: `✅ Уровень повышен до ${biz.level + 1}!` });
             
             const newMsgText = `🏢 Бизнес ${await getFullName(userId)}\n${biz.biz_name}\n\n💪 Уровень: ${biz.level + 1}/5\n🐱 ${formatMoney(bizData.baseIncome * (biz.level + 1) * 20)}$/час\n💸 На балансе бизнеса: ${formatMoney(totalBalance)}$\n\nПовышение уровня стоит: ${formatMoney((biz.level + 1) * 5000000)}$\n\n👉 Чтобы вывести деньги, напишите в чат /вывести`;
             
@@ -1058,7 +1130,7 @@ vk.updates.on('message_event', async (context) => {
 
         if (payload.cmd === 'top_menu') {
             if (String(context.userId) !== String(payload.author)) {
-                return await context.answer({ type: 'show_snackbar', text: '❌ Это меню вызвано другим пользователем.' });
+                return await vk.api.messages.sendMessageEventAnswer({ event_id: context.eventId, user_id: userId, peer_id: context.peerId, event_data: JSON.stringify({ type: 'show_snackbar', text: '❌ Это меню вызвано другим пользователем.' }) });
             }
 
             const type = payload.type;
@@ -1098,7 +1170,7 @@ vk.updates.on('message_event', async (context) => {
                 }
             }
 
-            if (rows.length === 0) return await context.answer({ type: 'show_snackbar', text: '❌ Топ пуст.' });
+            if (rows.length === 0) return await vk.api.messages.sendMessageEventAnswer({ event_id: context.eventId, user_id: userId, peer_id: context.peerId, event_data: JSON.stringify({ type: 'show_snackbar', text: '❌ Топ пуст.' }) });
 
             const userIds = rows.map(r => r.user_id);
             let usersInfo = [];
@@ -1130,8 +1202,7 @@ vk.updates.on('message_event', async (context) => {
                 }
             }
 
-            await context.answer();
-            await vk.api.messages.edit({
+            await context.editMessage({
                 peer_id: context.peerId,
                 conversation_message_id: context.conversationMessageId,
                 message: topText,
@@ -1142,7 +1213,7 @@ vk.updates.on('message_event', async (context) => {
         }
 
         if (payload.cmd === 'top_back') {
-            if (String(context.userId) !== String(payload.author)) return await context.answer({ type: 'show_snackbar', text: '❌ Это меню вызвано другим пользователем.' });
+            if (String(context.userId) !== String(payload.author)) return await vk.api.messages.sendMessageEventAnswer({ event_id: context.eventId, user_id: userId, peer_id: context.peerId, event_data: JSON.stringify({ type: 'show_snackbar', text: '❌ Это меню вызвано другим пользователем.' }) });
             
             const rows = await dbAll("SELECT user_id, count FROM chat_messages WHERE peer_id = ? ORDER BY count DESC LIMIT 10", [String(context.peerId)]);
             let topText = "⭐ ТОП 10 ПОЛЬЗОВАТЕЛЕЙ ПО СООБЩЕНИЯМ\n\n";
@@ -1164,8 +1235,7 @@ vk.updates.on('message_event', async (context) => {
                 topText += "В этой беседе еще никто не писал.";
             }
 
-            await context.answer();
-            await vk.api.messages.edit({
+            await context.editMessage({
                 peer_id: context.peerId,
                 conversation_message_id: context.conversationMessageId,
                 message: topText,
@@ -1180,8 +1250,8 @@ vk.updates.on('message_event', async (context) => {
             const row = await dbGet("SELECT challenger, bet FROM active_duels WHERE msg_id = ?", [duelId]);
             
             if (row) {
-                if (String(userId) === row.challenger) return await context.answer({ type: 'show_snackbar', text: '❌ Нельзя драться с собой!' });
-                if (await getBalance(userId) < row.bet) return await context.answer({ type: 'show_snackbar', text: '❌ Не хватает денег!' });
+                if (String(userId) === row.challenger) return await vk.api.messages.sendMessageEventAnswer({ event_id: context.eventId, user_id: userId, peer_id: context.peerId, event_data: JSON.stringify({ type: 'show_snackbar', text: '❌ Нельзя драться с собой!' }) });
+                if (await getBalance(userId) < row.bet) return await vk.api.messages.sendMessageEventAnswer({ event_id: context.eventId, user_id: userId, peer_id: context.peerId, event_data: JSON.stringify({ type: 'show_snackbar', text: '❌ Не хватает денег!' }) });
                 
                 const winnerId = Math.random() < 0.5 ? parseInt(row.challenger) : userId;
                 const loserId = winnerId === userId ? parseInt(row.challenger) : userId;
@@ -1191,16 +1261,13 @@ vk.updates.on('message_event', async (context) => {
                 await updateBalance(loserId, -row.bet);
                 
                 await dbRun("UPDATE users SET duel_wins = duel_wins + 1 WHERE user_id = ?", [String(winnerId)]);
-                
                 await dbRun("DELETE FROM active_duels WHERE msg_id = ?", [duelId]);
                 
                 const winnerName = await getFullName(winnerId);
                 const loserName = await getFullName(loserId);
                 const msgText = `⚔️ Дуэль завершена!\n\n🏆 Победитель: ${winnerName}\n❌ Проигравший: ${loserName}\n\n💰 Выигрыш: ${prize}$`;
                 
-                await context.answer({ type: 'show_snackbar', text: '⚔️ Дуэль завершена!' });
-                
-                await vk.api.messages.edit({
+                await context.editMessage({
                     peer_id: context.peerId,
                     conversation_message_id: context.conversationMessageId,
                     message: msgText,
@@ -1216,7 +1283,7 @@ vk.updates.on('message_event', async (context) => {
             const count = Number(payload.count);
             
             const row = await dbGet("SELECT bet FROM games WHERE game_id = ? AND user_id = ?", [gameId, String(userId)]);
-            if (!row) return await context.answer({ type: 'show_snackbar', text: '❌ Это не ваша игра!' });
+            if (!row) return await vk.api.messages.sendMessageEventAnswer({ event_id: context.eventId, user_id: userId, peer_id: context.peerId, event_data: JSON.stringify({ type: 'show_snackbar', text: '❌ Это не ваша игра!' }) });
 
             const minesArr = [];
             while(minesArr.length < count) {
@@ -1228,9 +1295,7 @@ vk.updates.on('message_event', async (context) => {
             
             const msgText = `💣 Мины\nСтавка: ${row.bet}$ | Мин: ${count} из 9\n\nВыбери клетку, чтобы открыть алмаз 💎`;
             
-            await context.answer(); 
-            
-            await vk.api.messages.edit({
+            await context.editMessage({
                 peer_id: context.peerId,
                 conversation_message_id: context.conversationMessageId,
                 message: msgText,
@@ -1245,13 +1310,13 @@ vk.updates.on('message_event', async (context) => {
             
             const row = await dbGet("SELECT bet, mines, opened, multiplier FROM games WHERE game_id = ? AND user_id = ?", [gameId, String(userId)]);
             
-            if (!row) return await context.answer({ type: 'show_snackbar', text: '❌ Это не ваша игра или она уже завершена.' });
+            if (!row) return await vk.api.messages.sendMessageEventAnswer({ event_id: context.eventId, user_id: userId, peer_id: context.peerId, event_data: JSON.stringify({ type: 'show_snackbar', text: '❌ Это не ваша игра или она уже завершена.' }) });
 
             const bet = row.bet;
             const mines = JSON.parse(row.mines);
             const opened = JSON.parse(row.opened);
             
-            if (opened.includes(cell)) return await context.answer({ type: 'show_snackbar', text: '❌ Клетка уже открыта!' });
+            if (opened.includes(cell)) return await vk.api.messages.sendMessageEventAnswer({ event_id: context.eventId, user_id: userId, peer_id: context.peerId, event_data: JSON.stringify({ type: 'show_snackbar', text: '❌ Клетка уже открыта!' }) });
 
             opened.push(cell);
 
@@ -1261,9 +1326,9 @@ vk.updates.on('message_event', async (context) => {
                 
                 const msgText = `💥 Вы попали на мину!\n\nПроигрыш: -${bet}$\nБаланс: ${formatMoney(await getBalance(userId))}$`;
                 
-                await context.answer({ type: 'show_snackbar', text: '💥 БУМ! Вы проиграли.' });
+                await vk.api.messages.sendMessageEventAnswer({ event_id: context.eventId, user_id: userId, peer_id: context.peerId, event_data: JSON.stringify({ type: 'show_snackbar', text: '💥 БУМ! Вы проиграли.' }) });
                 
-                await vk.api.messages.edit({
+                await context.editMessage({
                     peer_id: context.peerId,
                     conversation_message_id: context.conversationMessageId,
                     message: msgText,
@@ -1283,9 +1348,9 @@ vk.updates.on('message_event', async (context) => {
             const winAmount = Math.floor(bet * newMult);
             const msgText = `💣 Мины\nСтавка: ${bet}$ | Мин: ${mines.length} из 9\n\nОткрыто алмазов: ${opened.length} | Коэф: x${newMult}\nВыигрыш сейчас: ${winAmount}$`;
             
-            await context.answer({ type: 'show_snackbar', text: `💎 Алмаз! x${newMult}` });
+            await vk.api.messages.sendMessageEventAnswer({ event_id: context.eventId, user_id: userId, peer_id: context.peerId, event_data: JSON.stringify({ type: 'show_snackbar', text: `💎 Алмаз! x${newMult}` }) });
             
-            await vk.api.messages.edit({
+            await context.editMessage({
                 peer_id: context.peerId,
                 conversation_message_id: context.conversationMessageId,
                 message: msgText,
@@ -1298,10 +1363,10 @@ vk.updates.on('message_event', async (context) => {
             const gameId = String(payload.gameId);
             const row = await dbGet("SELECT bet, multiplier, mines FROM games WHERE game_id = ? AND user_id = ?", [gameId, String(userId)]);
             
-            if (!row) return await context.answer({ type: 'show_snackbar', text: '❌ Это не ваша игра или она уже завершена.' });
+            if (!row) return await vk.api.messages.sendMessageEventAnswer({ event_id: context.eventId, user_id: userId, peer_id: context.peerId, event_data: JSON.stringify({ type: 'show_snackbar', text: '❌ Это не ваша игра или она уже завершена.' }) });
 
             if (!row.mines || row.mines === '[]') {
-                return await context.answer({ type: 'show_snackbar', text: '❌ Игра еще не началась!' });
+                return await vk.api.messages.sendMessageEventAnswer({ event_id: context.eventId, user_id: userId, peer_id: context.peerId, event_data: JSON.stringify({ type: 'show_snackbar', text: '❌ Игра еще не началась!' }) });
             }
 
             const winAmount = Math.floor(row.bet * row.multiplier);
@@ -1310,13 +1375,15 @@ vk.updates.on('message_event', async (context) => {
             
             const msgText = `💰 Вы забрали выигрыш: ${winAmount}$!\nБаланс: ${formatMoney(await getBalance(userId))}$`;
             
-            await vk.api.messages.edit({
+            await vk.api.messages.sendMessageEventAnswer({ event_id: context.eventId, user_id: userId, peer_id: context.peerId, event_data: JSON.stringify({ type: 'show_snackbar', text: `💰 Вы забрали ${winAmount}$!` }) });
+
+            await context.editMessage({
                 peer_id: context.peerId,
                 conversation_message_id: context.conversationMessageId,
                 message: msgText,
                 keyboard: ""
             });
-            return await context.answer({ type: 'show_snackbar', text: `💰 Вы забрали ${winAmount}$!` });
+            return;
         }
 
     } catch (e) {
