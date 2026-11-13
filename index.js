@@ -816,22 +816,28 @@ vk.updates.on('message_event', async (context) => {
             const nextLevelCost = (Number(biz.level) === 1 ? 2000000 : Number(biz.level) === 2 ? 5000000 : Number(biz.level) * 5000000);
 
             if (payload.cmd === 'biz_withdraw') {
-                // ИСПРАВЛЕНИЕ БАГА: Минимальная сумма для вывода, чтобы не спамили по 200$
-                if (totalBalance < 5000) {
-                    return await context.answer({ type: 'show_snackbar', text: '❌ Слишком маленькая сумма. Подождите, пока накопится хотя бы 5,000$!' });
+                if (totalBalance <= 0) {
+                    return await context.answer({ type: 'show_snackbar', text: '❌ у вас пустой баланс бизнеса' });
                 }
 
                 await updateBalance(userId, totalBalance);
                 await dbRun("UPDATE businesses SET balance = 0, last_income = ? WHERE user_id = ?", [Date.now(), String(userId)]);
-                await context.answer({ type: 'show_snackbar', text: `💸 Вы вывели ${formatMoney(totalBalance)}$!` });
-                
+
+                // Отправляем сообщение в чат (как на скрине)
+                await vk.api.messages.send({
+                    peer_id: context.peerId,
+                    message: `💸 Вы вывели ${formatMoney(totalBalance)}$`,
+                    random_id: Math.floor(Math.random() * 1000000000),
+                    disable_mentions: 1
+                });
+
+                // Пытаемся отредактировать сообщение, чтобы обнулить баланс
                 const newMsgText = `🏢 Бизнес ${await getFullName(userId)}\n${biz.biz_name}\n\n💪 Уровень: ${biz.level}/5\n🐱 ${formatMoney(bizData.baseIncome * biz.level * 20)}$/час\n💸 На балансе бизнеса: 0$\n\nБизнес работает только 4 часа! Чтобы опять стал работать нужно вывести $$$`;
                 
                 try {
                     await context.editMessage({ message: newMsgText, keyboard: getBizKb(userId), disable_mentions: 1 });
                 } catch(e) {
-                    // Если ВК не дает редактировать старое сообщение - просто ничего не делаем, чтобы не спамить
-                    console.log("Не удалось отредактировать сообщение бизнеса:", e.message);
+                    // Игнорируем ошибку, если сообщение слишком старое
                 }
                 return;
             }
