@@ -169,11 +169,9 @@ const getTopCoinsKb = () => Keyboard.builder().inline().callbackButton({
 
 // ===== ОБРАБОТКА СООБЩЕНИЙ =====
 vk.updates.on('message_new', async (message) => {
-    if (message.isOutbox) return;
-    if (message.senderId < 0) return;
-
     try {
-        // ===== ПРИВЕТСТВИЕ ПРИ ДОБАВЛЕНИИ (БЕЗ РЕПЛАЯ) =====
+        // ===== ПЕРВЫМ ДЕЛОМ ЛОВИМ ДОБАВЛЕНИЕ В БЕСЕДУ =====
+        // (ставим это ДО проверки isOutbox, так как ВК помечает действие как out: 1)
         if (message.action) {
             const action = message.action;
             
@@ -195,10 +193,14 @@ vk.updates.on('message_new', async (message) => {
                     } catch (err) {
                         console.error(`[ОШИБКА ПРИВЕТСТВИЯ]`, err);
                     }
-                    return; // Выходим, чтобы не обрабатывать дальше
+                    return; // Выходим, дальше обрабатывать не нужно
                 }
             }
         }
+
+        // Теперь проверяем на исходящие (для обычных сообщений)
+        if (message.isOutbox) return;
+        if (message.senderId < 0) return;
 
         const text = message.text ? message.text.trim().toLowerCase() : '';
         if (!text) return;
