@@ -198,7 +198,7 @@ function getMinesGameUI(gameId, bet, minesCount, minesArr, opened, isLoss = fals
     if (isLoss) {
         const lostMoney = currentMoney;
         return {
-            text: `💥 **БАБАХ! ПОРАЖЕНИЕ**\n────────────────────\n👤 ${name} наступил(а) на мину!\n💣 Мин на поле: ${minesCount}\n✅ Успел(а) открыть: ${currentOpened}\n\n📉 Потеряно: -${bet} 💰\n😢 Не забрал(а): ${lostMoney} 💰 (x${currentMult})\n💳 Баланс: ${formatMoney(balance)} 💰\n\n💬 Бывает. Следующая будет твоей 🍀`,
+            text: `💥 БАБАХ! ПОРАЖЕНИЕ\n────────────────────\n👤 ${name} наступил(а) на мину!\n💣 Мин на поле: ${minesCount}\n✅ Успел(а) открыть: ${currentOpened}\n\n📉 Потеряно: -${bet} 💰\n😢 Не забрал(а): ${lostMoney} 💰 (x${currentMult})\n💳 Баланс: ${formatMoney(balance)} 💰\n\n💬 Бывает. Следующая будет твоей 🍀`,
             kb: buildMinesKb(gameId, opened, minesArr, true, hitCell)
         };
     } else {
@@ -212,7 +212,7 @@ function getMinesGameUI(gameId, bet, minesCount, minesArr, opened, isLoss = fals
         const phrase = currentOpened === 0 ? randomPhrases[0] : randomPhrases[Math.floor(Math.random() * (randomPhrases.length - 1)) + 1];
 
         return {
-            text: `💣 **МИНЫ**\n────────────────────\n👤 ${name}\n💵 Ставка: ${bet} | 💣 Мин: ${minesCount}\n\n${progressBar} ${currentOpened}/${totalSafe}\n📈 Сейчас: x${currentMult.toFixed(2)} → ${currentMoney} 💰\n🎯 Следующая: x${nextMult.toFixed(2)} → ${nextMoney} 💰\n🍀 Шанс безопасной клетки: ${chance}%\n⏱ Осталось: ${timeLeft} сек.\n\n💬 ${phrase}`,
+            text: `💣 МИНЫ\n────────────────────\n👤 ${name}\n💵 Ставка: ${bet} | 💣 Мин: ${minesCount}\n\n${progressBar} ${currentOpened}/${totalSafe}\n📈 Сейчас: x${currentMult.toFixed(2)} → ${currentMoney} 💰\n🎯 Следующая: x${nextMult.toFixed(2)} → ${nextMoney} 💰\n🍀 Шанс безопасной клетки: ${chance}%\n⏱ Осталось: ${timeLeft} сек.\n\n💬 ${phrase}`,
             kb: buildMinesKb(gameId, opened, minesArr, false, null, currentMoney)
         };
     }
@@ -942,11 +942,10 @@ vk.updates.on('message_event', async (context) => {
     try {
         const payload = context.eventPayload;
         const userId = context.userId;
-        
-        // ПРОВЕРКА АВТОРА ДО ОТВЕТА НА КНОПКУ (чтобы не редактировать чужое сообщение)
+
+        // 1. ПРОВЕРКА АВТОРА (чтобы не редактировать чужое сообщение)
         if ((payload.cmd === 'top_menu' || payload.cmd === 'top_back' || payload.cmd === 'biz_upgrade') && payload.author) {
             if (String(userId) !== String(payload.author)) {
-                // Показываем всплывающее окошко (снекбар) только нажавшему
                 return await context.answer({
                     type: 'show_snackbar',
                     text: '❌ Это меню вызвано другим пользователем.'
@@ -954,28 +953,51 @@ vk.updates.on('message_event', async (context) => {
             }
         }
 
-        // СРАЗУ ОТВЕЧАЕМ, ЧТОБЫ УБРАТЬ ЗАГРУЗКУ И НЕ БЫЛО ОШИБКИ INVALID EVENT_ID (если проверка выше пройдена)
-        await context.answer().catch(() => {});
+        // 2. ОБРАБОТКА БИЗНЕСА (выдаем ошибки снекбаром, чтобы не стирать меню)
+        if (payload.cmd === 'biz_upgrade') {
+            const biz = await dbGet("SELECT * FROM businesses WHERE user_id = ?", [String(userId)]);
+            if (!biz) {
+                return await context.answer({ type: 'show_snackbar', text: '❌ У вас нет бизнеса.' });
+            }
 
-        if (payload.cmd === 'work_menu') {
-            await vk.api.messages.edit({
+            if (biz.level >= 5) {
+                return await context.answer({ type: 'show_snackbar', text: '❌ Максимальный уровень!' });
+            }
+
+            const bizData = Object.values(BIZ_DATA).find(b => b.name === biz.biz_name) || { name: biz.biz_name, baseIncome: 1000 };
+            const timePassed = Date.now() - biz.last_income;
+            const earned = Math.floor(timePassed * ((bizData.baseIncome * biz.level) / 180000));
+            const totalBalance = Number(biz.balance) + earned;
+            const nextLevelCost = (Number(biz.level) === 1 ? 2000000 : Number(biz.level) === 2 ? 5000000 : Number(biz.level) * 5000000);
+
+            const userBal = await getBalance(userId);
+            if (userBal < nextLevelCost) {
+                return await context.answer({ type: 'show_snackbar', text: '❌ Не хватает денег на балансе!' });
+            }
+
+            // Если всё ок, отвечаем и обновляем сообщение
+            await context.answer().catch(() => {});
+            await updateBalance(userId, -nextLevelCost);
+            await dbRun("UPDATE businesses SET level = level + 1, balance = ?, last_income = ? WHERE user_id = ?", [totalBalance, Date.now(), String(userId)]);
+            
+            const newMsgText = `🏢 Бизнес ${await getFullName(userId)}\n${biz.biz_name}\n\n💪 Уровень: ${biz.level + 1}/5\n🐱 ${formatMoney(bizData.baseIncome * (biz.level + 1) * 20)}$/час\n💸 На балансе бизнеса: ${formatMoney(totalBalance)}$\n\nПовышение уровня стоит: ${formatMoney((biz.level + 1) * 5000000)}$\n\n👉 Чтобы вывести деньги, напишите в чат /вывести`;
+            
+            await vk.api.messages.edit({ 
                 peer_id: context.peerId,
-                message: "💼 Выберите работу:",
-                keyboard: getWorkKb(),
+                message: newMsgText, 
+                keyboard: getBizKb(userId), 
+                disable_mentions: 1,
                 conversation_message_id: context.conversationMessageId
             });
             return;
         }
+
+        // 3. ОБРАБОТКА РАБОТЫ (если кулдаун, показываем снекбар)
         if (payload.cmd === 'work_do') {
             const now = Date.now();
             const workRow = await dbGet("SELECT count, last_reset FROM work_cd WHERE user_id = ?", [String(userId)]);
-            let count = 0;
-            let lastReset = 0;
-
-            if (workRow) {
-                count = Number(workRow.count);
-                lastReset = Number(workRow.last_reset);
-            }
+            let count = workRow ? Number(workRow.count) : 0;
+            let lastReset = workRow ? Number(workRow.last_reset) : 0;
 
             if (now - lastReset >= 3600000) {
                 count = 0;
@@ -986,14 +1008,10 @@ vk.updates.on('message_event', async (context) => {
                 const remaining = 3600000 - (now - lastReset);
                 const m = Math.floor(remaining / 60000);
                 const s = Math.floor((remaining % 60000) / 1000);
-                return await vk.api.messages.edit({
-                    peer_id: context.peerId,
-                    message: `⏳ Вы отработали 3 раза. Ждите ${m} мин. ${s} сек.`,
-                    keyboard: getWorkKb(),
-                    conversation_message_id: context.conversationMessageId
-                });
+                return await context.answer({ type: 'show_snackbar', text: `⏳ Ждите ${m} мин. ${s} сек.` });
             }
 
+            await context.answer().catch(() => {});
             count++;
             await dbRun("REPLACE INTO work_cd (user_id, count, last_reset) VALUES (?, ?, ?)", [String(userId), count, lastReset]);
 
@@ -1014,6 +1032,19 @@ vk.updates.on('message_event', async (context) => {
             await vk.api.messages.edit({ 
                 peer_id: context.peerId,
                 message: `${msgText}\n\n💰 Ваш баланс: ${formatMoney(newBal)}$\n📊 Осталось попыток: ${3 - count}/3`, 
+                keyboard: getWorkKb(),
+                conversation_message_id: context.conversationMessageId
+            });
+            return;
+        }
+
+        // 4. ДЛЯ ОСТАЛЬНЫХ КНОПОК СРАЗУ ОТВЕЧАЕМ ПУСТЫМ (чтобы не было invalid event_id)
+        await context.answer().catch(() => {});
+
+        if (payload.cmd === 'work_menu') {
+            await vk.api.messages.edit({
+                peer_id: context.peerId,
+                message: "💼 Выберите работу:",
                 keyboard: getWorkKb(),
                 conversation_message_id: context.conversationMessageId
             });
@@ -1072,55 +1103,7 @@ vk.updates.on('message_event', async (context) => {
             }
         }
 
-        if (payload.cmd === 'biz_upgrade') {
-            // Проверка автора уже прошла выше
-            const biz = await dbGet("SELECT * FROM businesses WHERE user_id = ?", [String(userId)]);
-            if (!biz) return await vk.api.messages.edit({
-                peer_id: context.peerId,
-                message: "❌ У вас нет бизнеса.",
-                keyboard: "",
-                conversation_message_id: context.conversationMessageId
-            });
-
-            const bizData = Object.values(BIZ_DATA).find(b => b.name === biz.biz_name) || { name: biz.biz_name, baseIncome: 1000 };
-            const timePassed = Date.now() - biz.last_income;
-            const earned = Math.floor(timePassed * ((bizData.baseIncome * biz.level) / 180000));
-            const totalBalance = Number(biz.balance) + earned;
-            const nextLevelCost = (Number(biz.level) === 1 ? 2000000 : Number(biz.level) === 2 ? 5000000 : Number(biz.level) * 5000000);
-
-            const userBal = await getBalance(userId);
-            if (biz.level >= 5) return await vk.api.messages.edit({
-                peer_id: context.peerId,
-                message: "❌ Максимальный уровень!",
-                keyboard: "",
-                conversation_message_id: context.conversationMessageId
-            });
-            if (userBal < nextLevelCost) return await vk.api.messages.edit({
-                peer_id: context.peerId,
-                message: "❌ Не хватает денег на балансе!",
-                keyboard: "",
-                conversation_message_id: context.conversationMessageId
-            });
-
-            await updateBalance(userId, -nextLevelCost);
-            await dbRun("UPDATE businesses SET level = level + 1, balance = ?, last_income = ? WHERE user_id = ?", [totalBalance, Date.now(), String(userId)]);
-            
-            const newMsgText = `🏢 Бизнес ${await getFullName(userId)}\n${biz.biz_name}\n\n💪 Уровень: ${biz.level + 1}/5\n🐱 ${formatMoney(bizData.baseIncome * (biz.level + 1) * 20)}$/час\n💸 На балансе бизнеса: ${formatMoney(totalBalance)}$\n\nПовышение уровня стоит: ${formatMoney((biz.level + 1) * 5000000)}$\n\n👉 Чтобы вывести деньги, напишите в чат /вывести`;
-            
-            try {
-                await vk.api.messages.edit({ 
-                    peer_id: context.peerId,
-                    message: newMsgText, 
-                    keyboard: getBizKb(userId), 
-                    disable_mentions: 1,
-                    conversation_message_id: context.conversationMessageId
-                });
-            } catch(e) {}
-            return;
-        }
-
         if (payload.cmd === 'top_menu') {
-            // Проверка автора уже прошла выше
             const type = payload.type;
             const scope = payload.scope;
             const repType = payload.repType || 'pos';
@@ -1209,7 +1192,6 @@ vk.updates.on('message_event', async (context) => {
         }
 
         if (payload.cmd === 'top_back') {
-            // Проверка автора уже прошла выше
             const rows = await dbAll("SELECT user_id, count FROM chat_messages WHERE peer_id = ? ORDER BY count DESC LIMIT 10", [String(context.peerId)]);
             let topText = "⭐ ТОП 10 ПОЛЬЗОВАТЕЛЕЙ ПО СООБЩЕНИЯМ\n\n";
             
@@ -1310,7 +1292,6 @@ vk.updates.on('message_event', async (context) => {
                 await dbRun("UPDATE games SET mines = ?, opened = '[]', multiplier = 1.0, start_time = ? WHERE game_id = ?", [minesStr, now, gameId]);
                 
                 const name = await getFullName(userId);
-                // Передаем gameId и minesArr
                 const ui = getMinesGameUI(gameId, row.bet, count, minesArr, [], false, null, name, await getBalance(userId), 60);
                 
                 await vk.api.messages.edit({
@@ -1398,7 +1379,7 @@ vk.updates.on('message_event', async (context) => {
                     const ui = getMinesGameUI(gameId, bet, mines.length, mines, opened, true, hitCell, name, balance);
                     let text = ui.text;
                     if (hitCell === -1) {
-                        text = `🏆 **ПОБЕДА!**\n────────────────────\n👤 ${name}\n💣 Мин на поле: ${mines.length}\n✅ Успел(а) открыть: ${opened.length}\n\n📈 Выигрыш: +${currentMoney} 💰 (x${(currentMoney/bet).toFixed(2)})\n💳 Баланс: ${formatMoney(balance)} 💰\n\n💬 Поздравляем! Ты забрал всё! 🎉`;
+                        text = `🏆 ПОБЕДА!\n────────────────────\n👤 ${name}\n💣 Мин на поле: ${mines.length}\n✅ Успел(а) открыть: ${opened.length}\n\n📈 Выигрыш: +${currentMoney} 💰 (x${(currentMoney/bet).toFixed(2)})\n💳 Баланс: ${formatMoney(balance)} 💰\n\n💬 Поздравляем! Ты забрал всё! 🎉`;
                     }
                     
                     await vk.api.messages.edit({
@@ -1441,7 +1422,7 @@ vk.updates.on('message_event', async (context) => {
                 const mines = JSON.parse(row.mines);
                 const opened = JSON.parse(row.opened);
                 
-                const msgText = `💰 **ВЫВОД**\n────────────────────\n👤 ${await getFullName(userId)}\n💵 Забрал: ${winAmount} 💰 (x${row.multiplier})\n💳 Баланс: ${formatMoney(balance)} 💰\n\n💬 Отличная игра! Заходи ещё 🍀`;
+                const msgText = `💰 ВЫВОД\n────────────────────\n👤 ${await getFullName(userId)}\n💵 Забрал: ${winAmount} 💰 (x${row.multiplier})\n💳 Баланс: ${formatMoney(balance)} 💰\n\n💬 Отличная игра! Заходи ещё 🍀`;
                 
                 await vk.api.messages.edit({
                     peer_id: context.peerId,
