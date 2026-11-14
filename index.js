@@ -428,30 +428,57 @@ vk.updates.on('message_new', async (message) => {
                 const cacheKey = `${peerId}_${userId}`;
                 let spamData = spamCache.get(cacheKey);
 
-                if (!spamData || (now - spamData.lastReset >= timeSec * 1000)) {
-                    spamData = { count: 0, lastReset: now, isMuted: false };
+                if (!spamData) {
+                    spamData = { count: 0, lastReset: now, isMuted: false, muteEndTime: 0 };
+                }
+
+                // Если игрок уже в муте
+                if (spamData.isMuted) {
+                    if (now < spamData.muteEndTime) {
+                        // Он всё ещё в муте, удаляем его сообщение
+                        try {
+                            await vk.api.messages.delete({ message_ids: [message.id], delete_for_all: 1 });
+                        } catch (e) {}
+                        return; // Выходим из обработки сообщения, чтобы бот не отвечал
+                    } else {
+                        // Мут закончился
+                        spamData.isMuted = false;
+                    }
+                }
+
+                if (now - spamData.lastReset >= timeSec * 1000) {
+                    spamData.count = 0;
+                    spamData.lastReset = now;
                 }
 
                 spamData.count++;
                 spamCache.set(cacheKey, spamData);
 
                 if (spamData.count >= limit && !spamData.isMuted) {
-                    spamData.isMuted = true; // Ставим флаг, чтобы не спамить API мута
+                    spamData.isMuted = true; 
+                    spamData.muteEndTime = now + (muteMin * 60 * 1000); // Запоминаем время окончания мута
+                    spamCache.set(cacheKey, spamData);
+                    
                     try {
                         await vk.api.messages.changeConversationMemberRestrictions({
                             group_id: GROUP_ID,
                             peer_id: peerId,
                             member_id: userId,
-                            action: 'ro', // ВАЖНО: 'ro' значит Read-Only (мут)
+                            action: 'ro', // Read-Only (мут)
                             for: muteMin * 60
                         });
                         
                         await message.reply(`🚫 [id${userId}|Игрок] получил блокировку чата на ${muteMin} минут за нарушение антиспама.`);
-                        spamData.count = 0; // Сбрасываем счетчик после мута
+                        spamData.count = 0; // Сбрасываем счетчик
                         spamCache.set(cacheKey, spamData);
+
+                        // Пытаемся удалить текущее сообщение, с которого начался мут
+                        try {
+                            await vk.api.messages.delete({ message_ids: [message.id], delete_for_all: 1 });
+                        } catch(e) {}
                     } catch(e) {
-                        console.error("Не удалось выдать мут. Проверьте права бота в беседе:", e.message);
-                        // Если не удалось, сбрасываем флаг, чтобы попробовать снова (вдруг права появятся)
+                        console.error("Не удалось выдать мут. Проверьте права бота в беседе (Блокировка/Удаление):", e.message);
+                        // Если не удалось выдать мут, снимаем флаг
                         spamData.isMuted = false;
                         spamCache.set(cacheKey, spamData);
                     }
