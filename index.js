@@ -33,6 +33,7 @@ const dbAll = (query, params = []) => new Promise((res, rej) => db.all(query, pa
 // Временные хранилища (в памяти)
 const gameCooldowns = new Map(); // Для 10-сек КД в играх
 const adminStates = new Map(); // Для настройки лимитов через команды
+const spamCache = new Map(); // БЫСТРЫЙ АНТИСПАМ В ПАМЯТИ
 
 // Данные бизнесов
 const BIZ_DATA = {
@@ -67,9 +68,8 @@ async function initDB() {
     await dbRun("CREATE TABLE IF NOT EXISTS rep_limits (user_id TEXT PRIMARY KEY, count INTEGER DEFAULT 0, last_reset INTEGER)");
     await dbRun("CREATE TABLE IF NOT EXISTS work_cd (user_id TEXT PRIMARY KEY, count INTEGER DEFAULT 0, last_reset INTEGER)");
     
-    // Таблицы для настроек и антиспама
+    // Таблицы для настроек
     await dbRun("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)");
-    await dbRun("CREATE TABLE IF NOT EXISTS spam_tracker (peer_id TEXT, user_id TEXT, count INTEGER DEFAULT 0, last_reset INTEGER, PRIMARY KEY (peer_id, user_id))");
 
     try { await dbRun("ALTER TABLE users ADD COLUMN reputation INTEGER DEFAULT 0"); } catch(e) {}
     try { await dbRun("ALTER TABLE users ADD COLUMN xp INTEGER DEFAULT 0"); } catch(e) {}
@@ -412,7 +412,7 @@ vk.updates.on('message_new', async (message) => {
         const parts = cleanText.split(/\s+/);
         const cmdWord = parts[0];
 
-        // --- ЛОГИКА АНТИСПАМА (МУТ) ---
+        // --- ЛОГИКА АНТИСПАМА (МУТ) С ИСПОЛЬЗОВАНИЕМ ПАМЯТИ ---
         if (message.isChat && userId !== ADMIN_ID) {
             const spamEnabled = await dbGet("SELECT value FROM settings WHERE key = 'antispam_enabled'");
             if (spamEnabled && spamEnabled.value === '1') {
@@ -425,45 +425,36 @@ vk.updates.on('message_new', async (message) => {
                 const muteMin = Number(muteDb?.value || 10);
 
                 const now = Date.now();
-                const tracker = await dbGet("SELECT count, last_reset FROM spam_tracker WHERE peer_id = ? AND user_id = ?", [String(peerId), String(userId)]);
+                const cacheKey = `${peerId}_${userId}`;
+                let spamData = spamCache.get(cacheKey);
 
-                let msgCount = 0;
-                let lastReset = 0;
-
-                if (tracker) {
-                    msgCount = Number(tracker.count);
-                    lastReset = Number(tracker.last_reset);
+                if (!spamData || (now - spamData.lastReset >= timeSec * 1000)) {
+                    spamData = { count: 0, lastReset: now, isMuted: false };
                 }
 
-                if (now - lastReset >= timeSec * 1000) {
-                    msgCount = 0;
-                    lastReset = now;
-                }
+                spamData.count++;
+                spamCache.set(cacheKey, spamData);
 
-                msgCount++;
-
-                if (msgCount >= limit) {
-                    const chatId = peerId - 2000000000;
+                if (spamData.count >= limit && !spamData.isMuted) {
+                    spamData.isMuted = true; // Ставим флаг, чтобы не спамить API мута
                     try {
                         await vk.api.messages.changeConversationMemberRestrictions({
                             group_id: GROUP_ID,
                             peer_id: peerId,
                             member_id: userId,
-                            action: 'mute',
+                            action: 'ro', // ВАЖНО: 'ro' значит Read-Only (мут)
                             for: muteMin * 60
                         });
                         
-                        // Обновленный текст
                         await message.reply(`🚫 [id${userId}|Игрок] получил блокировку чата на ${muteMin} минут за нарушение антиспама.`);
-                        await dbRun("UPDATE spam_tracker SET count = 0, last_reset = ? WHERE peer_id = ? AND user_id = ?", [now, String(peerId), String(userId)]);
-                        return; // Останавливаем обработку сообщения
+                        spamData.count = 0; // Сбрасываем счетчик после мута
+                        spamCache.set(cacheKey, spamData);
                     } catch(e) {
-                        console.error("Не удалось выдать мут:", e.message);
-                        // Если не удалось выдать мут, просто сбрасываем счетчик
-                        await dbRun("UPDATE spam_tracker SET count = 0, last_reset = ? WHERE peer_id = ? AND user_id = ?", [now, String(peerId), String(userId)]);
+                        console.error("Не удалось выдать мут. Проверьте права бота в беседе:", e.message);
+                        // Если не удалось, сбрасываем флаг, чтобы попробовать снова (вдруг права появятся)
+                        spamData.isMuted = false;
+                        spamCache.set(cacheKey, spamData);
                     }
-                } else {
-                    await dbRun("REPLACE INTO spam_tracker (peer_id, user_id, count, last_reset) VALUES (?, ?, ?, ?)", [String(peerId), String(userId), msgCount, lastReset]);
                 }
             }
         }
