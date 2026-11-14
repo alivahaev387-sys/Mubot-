@@ -947,7 +947,12 @@ vk.updates.on('message_event', async (context) => {
         await context.answer().catch(() => {});
 
         if (payload.cmd === 'work_menu') {
-            await context.editMessage({ message: "💼 Выберите работу:", keyboard: getWorkKb() });
+            await vk.api.messages.edit({
+                peer_id: context.peerId,
+                message: "💼 Выберите работу:",
+                keyboard: getWorkKb(),
+                conversation_message_id: context.conversationMessageId
+            });
             return;
         }
         if (payload.cmd === 'work_do') {
@@ -970,7 +975,12 @@ vk.updates.on('message_event', async (context) => {
                 const remaining = 3600000 - (now - lastReset);
                 const m = Math.floor(remaining / 60000);
                 const s = Math.floor((remaining % 60000) / 1000);
-                return await context.editMessage({ message: `⏳ Вы отработали 3 раза. Ждите ${m} мин. ${s} сек.`, keyboard: getWorkKb() });
+                return await vk.api.messages.edit({
+                    peer_id: context.peerId,
+                    message: `⏳ Вы отработали 3 раза. Ждите ${m} мин. ${s} сек.`,
+                    keyboard: getWorkKb(),
+                    conversation_message_id: context.conversationMessageId
+                });
             }
 
             count++;
@@ -990,9 +1000,11 @@ vk.updates.on('message_event', async (context) => {
 
             const newBal = await getBalance(userId);
             
-            await context.editMessage({ 
+            await vk.api.messages.edit({ 
+                peer_id: context.peerId,
                 message: `${msgText}\n\n💰 Ваш баланс: ${formatMoney(newBal)}$\n📊 Осталось попыток: ${3 - count}/3`, 
-                keyboard: getWorkKb() 
+                keyboard: getWorkKb(),
+                conversation_message_id: context.conversationMessageId
             });
             return;
         }
@@ -1004,29 +1016,66 @@ vk.updates.on('message_event', async (context) => {
                 const isClickerAdmin = clicker && (clicker.is_admin || clicker.is_owner);
                 
                 if (!isClickerAdmin && userId !== ADMIN_ID) {
-                    return await context.editMessage({ message: "❌ Только администраторы беседы могут это сделать!", keyboard: "" });
+                    return await vk.api.messages.edit({
+                        peer_id: context.peerId,
+                        message: "❌ Только администраторы беседы могут это сделать!",
+                        keyboard: "",
+                        conversation_message_id: context.conversationMessageId
+                    });
                 }
 
                 const bot = members.items.find(m => m.member_id == -GROUP_ID || m.member_id == GROUP_ID);
                 const isBotAdmin = bot && bot.is_admin;
 
                 if (payload.cmd === 'activate_bot') {
-                    if (!isBotAdmin) return await context.editMessage({ message: "❌ Ошибка. Убедитесь, что бот владеет статусом администратора.", keyboard: "" });
-                    await context.editMessage({ message: "🎉 Вы подключили бота к беседе!\nЧтобы узнать подробности напишите /help", disable_mentions: 1, keyboard: "" });
+                    if (!isBotAdmin) return await vk.api.messages.edit({
+                        peer_id: context.peerId,
+                        message: "❌ Ошибка. Убедитесь, что бот владеет статусом администратора.",
+                        keyboard: "",
+                        conversation_message_id: context.conversationMessageId
+                    });
+                    await vk.api.messages.edit({
+                        peer_id: context.peerId,
+                        message: "🎉 Вы подключили бота к беседе!\nЧтобы узнать подробности напишите /help",
+                        disable_mentions: 1,
+                        keyboard: "",
+                        conversation_message_id: context.conversationMessageId
+                    });
                 } else {
-                    await context.editMessage({ message: "❌ Активация отменена. Чтобы начать работу, добавьте бота заново.", disable_mentions: 1, keyboard: "" });
+                    await vk.api.messages.edit({
+                        peer_id: context.peerId,
+                        message: "❌ Активация отменена. Чтобы начать работу, добавьте бота заново.",
+                        disable_mentions: 1,
+                        keyboard: "",
+                        conversation_message_id: context.conversationMessageId
+                    });
                 }
                 return;
             } catch (e) {
-                return await context.editMessage({ message: "❌ Ошибка при проверке прав.", keyboard: "" });
+                return await vk.api.messages.edit({
+                    peer_id: context.peerId,
+                    message: "❌ Ошибка при проверке прав.",
+                    keyboard: "",
+                    conversation_message_id: context.conversationMessageId
+                });
             }
         }
 
         if (payload.cmd === 'biz_upgrade') {
-            if (String(context.userId) !== String(payload.author)) return await context.editMessage({ message: "❌ Это не ваш бизнес!", keyboard: "" });
+            if (String(context.userId) !== String(payload.author)) return await vk.api.messages.edit({
+                peer_id: context.peerId,
+                message: "❌ Это не ваш бизнес!",
+                keyboard: "",
+                conversation_message_id: context.conversationMessageId
+            });
             
             const biz = await dbGet("SELECT * FROM businesses WHERE user_id = ?", [String(userId)]);
-            if (!biz) return await context.editMessage({ message: "❌ У вас нет бизнеса.", keyboard: "" });
+            if (!biz) return await vk.api.messages.edit({
+                peer_id: context.peerId,
+                message: "❌ У вас нет бизнеса.",
+                keyboard: "",
+                conversation_message_id: context.conversationMessageId
+            });
 
             const bizData = Object.values(BIZ_DATA).find(b => b.name === biz.biz_name) || { name: biz.biz_name, baseIncome: 1000 };
             const timePassed = Date.now() - biz.last_income;
@@ -1035,8 +1084,18 @@ vk.updates.on('message_event', async (context) => {
             const nextLevelCost = (Number(biz.level) === 1 ? 2000000 : Number(biz.level) === 2 ? 5000000 : Number(biz.level) * 5000000);
 
             const userBal = await getBalance(userId);
-            if (biz.level >= 5) return await context.editMessage({ message: "❌ Максимальный уровень!", keyboard: "" });
-            if (userBal < nextLevelCost) return await context.editMessage({ message: "❌ Не хватает денег на балансе!", keyboard: "" });
+            if (biz.level >= 5) return await vk.api.messages.edit({
+                peer_id: context.peerId,
+                message: "❌ Максимальный уровень!",
+                keyboard: "",
+                conversation_message_id: context.conversationMessageId
+            });
+            if (userBal < nextLevelCost) return await vk.api.messages.edit({
+                peer_id: context.peerId,
+                message: "❌ Не хватает денег на балансе!",
+                keyboard: "",
+                conversation_message_id: context.conversationMessageId
+            });
 
             await updateBalance(userId, -nextLevelCost);
             await dbRun("UPDATE businesses SET level = level + 1, balance = ?, last_income = ? WHERE user_id = ?", [totalBalance, Date.now(), String(userId)]);
@@ -1044,14 +1103,25 @@ vk.updates.on('message_event', async (context) => {
             const newMsgText = `🏢 Бизнес ${await getFullName(userId)}\n${biz.biz_name}\n\n💪 Уровень: ${biz.level + 1}/5\n🐱 ${formatMoney(bizData.baseIncome * (biz.level + 1) * 20)}$/час\n💸 На балансе бизнеса: ${formatMoney(totalBalance)}$\n\nПовышение уровня стоит: ${formatMoney((biz.level + 1) * 5000000)}$\n\n👉 Чтобы вывести деньги, напишите в чат /вывести`;
             
             try {
-                await context.editMessage({ message: newMsgText, keyboard: getBizKb(userId), disable_mentions: 1 });
+                await vk.api.messages.edit({ 
+                    peer_id: context.peerId,
+                    message: newMsgText, 
+                    keyboard: getBizKb(userId), 
+                    disable_mentions: 1,
+                    conversation_message_id: context.conversationMessageId
+                });
             } catch(e) {}
             return;
         }
 
         if (payload.cmd === 'top_menu') {
             if (String(context.userId) !== String(payload.author)) {
-                return await context.editMessage({ message: "❌ Это меню вызвано другим пользователем.", keyboard: "" });
+                return await vk.api.messages.edit({
+                    peer_id: context.peerId,
+                    message: "❌ Это меню вызвано другим пользователем.",
+                    keyboard: "",
+                    conversation_message_id: context.conversationMessageId
+                });
             }
 
             const type = payload.type;
@@ -1092,7 +1162,12 @@ vk.updates.on('message_event', async (context) => {
             }
 
             if (rows.length === 0) {
-                await context.editMessage({ message: "❌ Топ пуст.", keyboard: getTopKb(payload.author, type, scope, repType) });
+                await vk.api.messages.edit({
+                    peer_id: context.peerId,
+                    message: "❌ Топ пуст.",
+                    keyboard: getTopKb(payload.author, type, scope, repType),
+                    conversation_message_id: context.conversationMessageId
+                });
                 return;
             }
 
@@ -1126,16 +1201,23 @@ vk.updates.on('message_event', async (context) => {
                 }
             }
 
-            await context.editMessage({
+            await vk.api.messages.edit({
+                peer_id: context.peerId,
                 message: topText,
                 keyboard: getTopKb(payload.author, type, scope, repType),
-                disable_mentions: 1
+                disable_mentions: 1,
+                conversation_message_id: context.conversationMessageId
             });
             return;
         }
 
         if (payload.cmd === 'top_back') {
-            if (String(context.userId) !== String(payload.author)) return await context.editMessage({ message: "❌ Это меню вызвано другим пользователем.", keyboard: "" });
+            if (String(context.userId) !== String(payload.author)) return await vk.api.messages.edit({
+                peer_id: context.peerId,
+                message: "❌ Это меню вызвано другим пользователем.",
+                keyboard: "",
+                conversation_message_id: context.conversationMessageId
+            });
             
             const rows = await dbAll("SELECT user_id, count FROM chat_messages WHERE peer_id = ? ORDER BY count DESC LIMIT 10", [String(context.peerId)]);
             let topText = "⭐ ТОП 10 ПОЛЬЗОВАТЕЛЕЙ ПО СООБЩЕНИЯМ\n\n";
@@ -1157,10 +1239,12 @@ vk.updates.on('message_event', async (context) => {
                 topText += "В этой беседе еще никто не писал.";
             }
 
-            await context.editMessage({
+            await vk.api.messages.edit({
+                peer_id: context.peerId,
                 message: topText,
                 keyboard: getTopKb(payload.author, 'coins', 'chat'),
-                disable_mentions: 1
+                disable_mentions: 1,
+                conversation_message_id: context.conversationMessageId
             });
             return;
         }
@@ -1170,8 +1254,18 @@ vk.updates.on('message_event', async (context) => {
             const row = await dbGet("SELECT challenger, bet FROM active_duels WHERE msg_id = ?", [duelId]);
             
             if (row) {
-                if (String(userId) === row.challenger) return await context.editMessage({ message: "❌ Нельзя драться с собой!", keyboard: "" });
-                if (await getBalance(userId) < row.bet) return await context.editMessage({ message: "❌ Не хватает денег!", keyboard: "" });
+                if (String(userId) === row.challenger) return await vk.api.messages.edit({
+                    peer_id: context.peerId,
+                    message: "❌ Нельзя драться с собой!",
+                    keyboard: "",
+                    conversation_message_id: context.conversationMessageId
+                });
+                if (await getBalance(userId) < row.bet) return await vk.api.messages.edit({
+                    peer_id: context.peerId,
+                    message: "❌ Не хватает денег!",
+                    keyboard: "",
+                    conversation_message_id: context.conversationMessageId
+                });
                 
                 const winnerId = Math.random() < 0.5 ? parseInt(row.challenger) : userId;
                 const loserId = winnerId === userId ? parseInt(row.challenger) : userId;
@@ -1187,10 +1281,12 @@ vk.updates.on('message_event', async (context) => {
                 const loserName = await getFullName(loserId);
                 const msgText = `⚔️ Дуэль завершена!\n\n🏆 Победитель: ${winnerName}\n❌ Проигравший: ${loserName}\n\n💰 Выигрыш: ${prize}$`;
                 
-                await context.editMessage({
+                await vk.api.messages.edit({
+                    peer_id: context.peerId,
                     message: msgText,
                     keyboard: "",
-                    disable_mentions: 1
+                    disable_mentions: 1,
+                    conversation_message_id: context.conversationMessageId
                 });
                 return;
             }
@@ -1204,7 +1300,12 @@ vk.updates.on('message_event', async (context) => {
             try {
                 const row = await dbGet("SELECT bet FROM games WHERE game_id = ? AND user_id = ?", [gameId, String(userId)]);
                 if (!row) {
-                    return await context.editMessage({ message: "❌ Игра устарела. Введите /мины заново.", keyboard: "" });
+                    return await vk.api.messages.edit({
+                        peer_id: context.peerId,
+                        message: "❌ Игра устарела. Введите /мины заново.",
+                        keyboard: "",
+                        conversation_message_id: context.conversationMessageId
+                    });
                 }
 
                 const minesArr = [];
@@ -1221,9 +1322,11 @@ vk.updates.on('message_event', async (context) => {
                 // Передаем gameId и minesArr
                 const ui = getMinesGameUI(gameId, row.bet, count, minesArr, [], false, null, name, await getBalance(userId), 60);
                 
-                await context.editMessage({
+                await vk.api.messages.edit({
+                    peer_id: context.peerId,
                     message: ui.text,
-                    keyboard: ui.kb
+                    keyboard: ui.kb,
+                    conversation_message_id: context.conversationMessageId
                 });
                 return;
             } catch(e) {
@@ -1258,9 +1361,11 @@ vk.updates.on('message_event', async (context) => {
                     const ui = getMinesGameUI(gameId, bet, mines.length, mines, opened, true, null, await getFullName(userId), balance);
                     let text = ui.text.replace('наступил(а) на мину!', 'не успел(а) открыть клетку!');
                     
-                    await context.editMessage({
+                    await vk.api.messages.edit({
+                        peer_id: context.peerId,
                         message: text,
-                        keyboard: ui.kb
+                        keyboard: ui.kb,
+                        conversation_message_id: context.conversationMessageId
                     });
                     return;
                 }
@@ -1305,18 +1410,22 @@ vk.updates.on('message_event', async (context) => {
                         text = `🏆 **ПОБЕДА!**\n────────────────────\n👤 ${name}\n💣 Мин на поле: ${mines.length}\n✅ Успел(а) открыть: ${opened.length}\n\n📈 Выигрыш: +${currentMoney} 💰 (x${(currentMoney/bet).toFixed(2)})\n💳 Баланс: ${formatMoney(balance)} 💰\n\n💬 Поздравляем! Ты забрал всё! 🎉`;
                     }
                     
-                    await context.editMessage({
+                    await vk.api.messages.edit({
+                        peer_id: context.peerId,
                         message: text,
-                        keyboard: ui.kb
+                        keyboard: ui.kb,
+                        conversation_message_id: context.conversationMessageId
                     });
                 } else {
                     const ui = getMinesGameUI(gameId, bet, mines.length, mines, opened, false, null, name, balance);
                     const timeLeft = Math.max(0, Math.floor((60000 - (Date.now() - startTime)) / 1000));
                     let text = ui.text.replace('{TIME}', timeLeft.toString());
                     
-                    await context.editMessage({
+                    await vk.api.messages.edit({
+                        peer_id: context.peerId,
                         message: text,
-                        keyboard: ui.kb
+                        keyboard: ui.kb,
+                        conversation_message_id: context.conversationMessageId
                     });
                 }
                 return;
@@ -1343,9 +1452,11 @@ vk.updates.on('message_event', async (context) => {
                 
                 const msgText = `💰 **ВЫВОД**\n────────────────────\n👤 ${await getFullName(userId)}\n💵 Забрал: ${winAmount} 💰 (x${row.multiplier})\n💳 Баланс: ${formatMoney(balance)} 💰\n\n💬 Отличная игра! Заходи ещё 🍀`;
                 
-                await context.editMessage({
+                await vk.api.messages.edit({
+                    peer_id: context.peerId,
                     message: msgText,
-                    keyboard: buildMinesKb(gameId, opened, mines, true, null)
+                    keyboard: buildMinesKb(gameId, opened, mines, true, null),
+                    conversation_message_id: context.conversationMessageId
                 });
                 return;
             } catch(e) {
