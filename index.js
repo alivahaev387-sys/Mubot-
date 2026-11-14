@@ -241,7 +241,8 @@ function buildMinesKb(gameId, opened, mines = [], isGameOver = false, hitCell = 
         if (i % 3 === 0) kb.row();
     }
     
-    if (!isGameOver && currentMoney > 0) {
+    // ИСПРАВЛЕНИЕ: Кнопка "Забрать" появляется только если открыта хотя бы 1 клетка
+    if (!isGameOver && currentMoney > 0 && opened.length > 0) {
         kb.callbackButton({ label: `💰 Забрать ${currentMoney}`, payload: { cmd: 'mines_cashout', gameId: String(gameId) }, color: Keyboard.SECONDARY_COLOR });
     }
     return kb.toString();
@@ -1368,7 +1369,8 @@ vk.updates.on('message_event', async (context) => {
                         isLoss = true;
                         hitCell = -1;
                     } else {
-                        await dbRun("UPDATE games SET opened = ? WHERE game_id = ?", [JSON.stringify(opened), gameId]);
+                        // ИСПРАВЛЕНИЕ: Сохраняем текущий множитель в базу, чтобы при выводе считалось правильно
+                        await dbRun("UPDATE games SET opened = ?, multiplier = ? WHERE game_id = ?", [JSON.stringify(opened), currentMult, gameId]);
                     }
                 }
 
@@ -1414,13 +1416,18 @@ vk.updates.on('message_event', async (context) => {
                 const row = await dbGet("SELECT bet, multiplier, mines, opened FROM games WHERE game_id = ? AND user_id = ?", [gameId, String(userId)]);
                 if (!row) return;
 
+                const opened = JSON.parse(row.opened);
+                // ИСПРАВЛЕНИЕ: Блокируем вывод, если не открыта ни одна клетка
+                if (opened.length === 0) {
+                    return; 
+                }
+
                 const winAmount = Math.floor(row.bet * row.multiplier);
                 await updateBalance(userId, winAmount);
                 await dbRun("DELETE FROM games WHERE game_id = ?", [gameId]);
                 
                 const balance = await getBalance(userId);
                 const mines = JSON.parse(row.mines);
-                const opened = JSON.parse(row.opened);
                 
                 const msgText = `💰 ВЫВОД\n────────────────────\n👤 ${await getFullName(userId)}\n💵 Забрал: ${winAmount} 💰 (x${row.multiplier})\n💳 Баланс: ${formatMoney(balance)} 💰\n\n💬 Отличная игра! Заходи ещё 🍀`;
                 
