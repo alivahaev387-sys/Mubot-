@@ -438,8 +438,10 @@ vk.updates.on('message_new', async (message) => {
                         // Он всё ещё в муте, удаляем его сообщение
                         try {
                             await vk.api.messages.delete({ message_ids: [message.id], delete_for_all: 1 });
-                        } catch (e) {}
-                        return; // Выходим из обработки сообщения, чтобы бот не отвечал
+                        } catch (e) {
+                            // Если бот не может удалить (нет прав), просто игнорируем
+                        }
+                        return; // Выходим из обработки сообщения, чтобы бот не отвечал и не выдавал мут повторно
                     } else {
                         // Мут закончился
                         spamData.isMuted = false;
@@ -510,7 +512,7 @@ vk.updates.on('message_new', async (message) => {
         }
 
         // Разрешаем команды без слэша
-        const validCmds = ['стакан', 'кубик', 'монетка', 'дрим', 'краш', 'рулетка', 'рул', 'автомат', 'блэкджек', 'мины', 'топ', 'профиль', 'баланс', 'бизнес', 'машины', 'работа', 'бонус', 'фортуна', 'казино', 'help', 'помощь', 'start', 'начать', 'transfer', 'перевод', 'duel', 'вывести', 'мойбизнес', 'закрыть', 'rep', 'реп', 'промолист', 'promo', 'купить', 'купитьбиз', 'чсб', 'разчсб', 'kick', 'выдать', 'обнулить', 'создать', 'cp', 'ping', 'пинг', 'убрать', 'настройки'];
+        const validCmds = ['стакан', 'кубик', 'монетка', 'дрим', 'краш', 'рулетка', 'рул', 'автомат', 'блэкджек', 'мины', 'топ', 'профиль', 'баланс', 'бизнес', 'машины', 'работа', 'бонус', 'фортуна', 'казино', 'help', 'помощь', 'start', 'начать', 'transfer', 'перевод', 'duel', 'вывести', 'мойбизнес', 'закрыть', 'rep', 'реп', 'промолист', 'promo', 'купить', 'купитьбиз', 'чсб', 'разчсб', 'kick', 'выдать', 'обнулить', 'создать', 'cp', 'ping', 'пинг', 'убрать', 'настройки', 'unmute'];
         const isMainButton = text.includes('работа') || text.includes('рулетка') || text.includes('профиль') || text.includes('топ');
 
         if (!text.startsWith('/') && !validCmds.includes(cmdWord) && !isMainButton) {
@@ -1187,6 +1189,31 @@ vk.updates.on('message_new', async (message) => {
                 return await message.reply(`⚙️ Настройки антиспама:\n\nСтатус: ${statusText}\n\nНажмите на кнопку, чтобы изменить параметр.`, {
                     keyboard: await getSettingsKb(enabled, limit, time, mute)
                 });
+            }
+
+            if (cleanText.startsWith('unmute')) {
+                const { targetId } = await getTargetAndReason(message, 'unmute');
+                if (!targetId) return await message.reply("⚠️ Укажите пользователя (ответом или @упоминанием), с кого нужно снять мут.", replyParams());
+                if (targetId === ADMIN_ID) return await message.reply("❌ Вы не можете снять мут с самого себя (вы и так админ).", replyParams());
+                
+                try {
+                    await vk.api.messages.changeConversationMemberRestrictions({
+                        group_id: GROUP_ID,
+                        peer_id: peerId,
+                        member_id: targetId,
+                        action: 'ro',
+                        for: 0 // Снимаем ограничение
+                    });
+                    
+                    // Очищаем кэш антиспама, чтобы он снова мог писать
+                    const cacheKey = `${peerId}_${targetId}`;
+                    spamCache.delete(cacheKey);
+                    
+                    const targetName = await getFullName(targetId);
+                    return await message.reply(`✅ Вы успешно сняли мут с игрока ${targetName}!`, replyParams());
+                } catch (e) {
+                    return await message.reply(`⚠️ Не удалось снять мут. Убедитесь, что у бота есть права на блокировку. Ошибка: ${e.message}`, replyParams());
+                }
             }
 
             if (cleanText.startsWith('убрать')) {
