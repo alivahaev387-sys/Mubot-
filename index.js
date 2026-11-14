@@ -30,6 +30,10 @@ const dbRun = (query, params = []) => new Promise((res, rej) => db.run(query, pa
 const dbGet = (query, params = []) => new Promise((res, rej) => db.get(query, params, (e, r) => e ? rej(e) : res(r)));
 const dbAll = (query, params = []) => new Promise((res, rej) => db.all(query, params, (e, r) => e ? rej(e) : res(r)));
 
+// Временные хранилища (в памяти)
+const gameCooldowns = new Map(); // Для 10-сек КД в играх
+const adminStates = new Map(); // Для настройки лимитов через команды
+
 // Данные бизнесов
 const BIZ_DATA = {
     'шаурма': { name: '🌯 Шаурма', price: 500000, baseIncome: 2000 },
@@ -62,6 +66,10 @@ async function initDB() {
     await dbRun("CREATE TABLE IF NOT EXISTS businesses (user_id TEXT PRIMARY KEY, biz_name TEXT, level INTEGER DEFAULT 1, balance INTEGER DEFAULT 0, last_income INTEGER, last_withdraw INTEGER DEFAULT 0)");
     await dbRun("CREATE TABLE IF NOT EXISTS rep_limits (user_id TEXT PRIMARY KEY, count INTEGER DEFAULT 0, last_reset INTEGER)");
     await dbRun("CREATE TABLE IF NOT EXISTS work_cd (user_id TEXT PRIMARY KEY, count INTEGER DEFAULT 0, last_reset INTEGER)");
+    
+    // Таблицы для настроек и антиспама
+    await dbRun("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)");
+    await dbRun("CREATE TABLE IF NOT EXISTS spam_tracker (peer_id TEXT, user_id TEXT, count INTEGER DEFAULT 0, last_reset INTEGER, PRIMARY KEY (peer_id, user_id))");
 
     try { await dbRun("ALTER TABLE users ADD COLUMN reputation INTEGER DEFAULT 0"); } catch(e) {}
     try { await dbRun("ALTER TABLE users ADD COLUMN xp INTEGER DEFAULT 0"); } catch(e) {}
@@ -72,6 +80,12 @@ async function initDB() {
     try { await dbRun("ALTER TABLE businesses ADD COLUMN last_withdraw INTEGER DEFAULT 0"); } catch(e) {}
     try { await dbRun("ALTER TABLE games ADD COLUMN start_time INTEGER"); } catch(e) {}
     try { await dbRun("ALTER TABLE users ADD COLUMN car TEXT DEFAULT NULL"); } catch(e) {}
+    
+    // Дефолтные настройки антиспама
+    await dbRun("INSERT OR IGNORE INTO settings (key, value) VALUES ('antispam_enabled', '0')");
+    await dbRun("INSERT OR IGNORE INTO settings (key, value) VALUES ('antispam_limit', '5')");
+    await dbRun("INSERT OR IGNORE INTO settings (key, value) VALUES ('antispam_time', '60')");
+    await dbRun("INSERT OR IGNORE INTO settings (key, value) VALUES ('antispam_mute', '10')");
     
     console.log("--- БАЗА ДАННЫХ ГОТОВА ---");
 }
@@ -300,6 +314,17 @@ const getHelpBackKb = () => Keyboard.builder().inline()
     .callbackButton({ label: '🔙 Назад', payload: { cmd: 'help_start' }, color: Keyboard.SECONDARY_COLOR })
     .toString();
 
+const getSettingsKb = async (enabled, limit, time, mute) => {
+    const kb = Keyboard.builder().inline();
+    kb.callbackButton({ label: enabled === '1' ? '🟢 Вкл' : '🔴 Выкл', payload: { cmd: 'settings_toggle' }, color: enabled === '1' ? Keyboard.POSITIVE_COLOR : Keyboard.NEGATIVE_COLOR });
+    kb.row();
+    kb.callbackButton({ label: `Лимит: ${limit}`, payload: { cmd: 'settings_edit', field: 'limit' }, color: Keyboard.SECONDARY_COLOR });
+    kb.callbackButton({ label: `Время (сек): ${time}`, payload: { cmd: 'settings_edit', field: 'time' }, color: Keyboard.SECONDARY_COLOR });
+    kb.row();
+    kb.callbackButton({ label: `Мут (мин): ${mute}`, payload: { cmd: 'settings_edit', field: 'mute' }, color: Keyboard.SECONDARY_COLOR });
+    return kb.toString();
+};
+
 const getDuelKb = (duelId) => Keyboard.builder().inline().callbackButton({
     label: '⚔️ Сразиться',
     payload: { cmd: 'duel_accept', duel_id: duelId },
@@ -385,8 +410,83 @@ vk.updates.on('message_new', async (message) => {
         const parts = cleanText.split(/\s+/);
         const cmdWord = parts[0];
 
+        // --- ЛОГИКА АНТИСПАМА (МУТ) ---
+        if (message.isChat && userId !== ADMIN_ID) {
+            const spamEnabled = await dbGet("SELECT value FROM settings WHERE key = 'antispam_enabled'");
+            if (spamEnabled && spamEnabled.value === '1') {
+                const limitDb = await dbGet("SELECT value FROM settings WHERE key = 'antispam_limit'");
+                const timeDb = await dbGet("SELECT value FROM settings WHERE key = 'antispam_time'");
+                const muteDb = await dbGet("SELECT value FROM settings WHERE key = 'antispam_mute'");
+                
+                const limit = Number(limitDb?.value || 5);
+                const timeSec = Number(timeDb?.value || 60);
+                const muteMin = Number(muteDb?.value || 10);
+
+                const now = Date.now();
+                const tracker = await dbGet("SELECT count, last_reset FROM spam_tracker WHERE peer_id = ? AND user_id = ?", [String(peerId), String(userId)]);
+
+                let msgCount = 0;
+                let lastReset = 0;
+
+                if (tracker) {
+                    msgCount = Number(tracker.count);
+                    lastReset = Number(tracker.last_reset);
+                }
+
+                if (now - lastReset >= timeSec * 1000) {
+                    msgCount = 0;
+                    lastReset = now;
+                }
+
+                msgCount++;
+
+                if (msgCount >= limit) {
+                    const chatId = peerId - 2000000000;
+                    try {
+                        await vk.api.messages.changeConversationMemberRestrictions({
+                            group_id: GROUP_ID,
+                            peer_id: peerId,
+                            member_id: userId,
+                            action: 'mute',
+                            for: muteMin * 60
+                        });
+                        await message.reply(`🤐 ${await getFullName(userId)} замучен на ${muteMin} мин. за флуд.`);
+                        await dbRun("UPDATE spam_tracker SET count = 0, last_reset = ? WHERE peer_id = ? AND user_id = ?", [now, String(peerId), String(userId)]);
+                        return; // Останавливаем обработку сообщения
+                    } catch(e) {
+                        console.error("Не удалось выдать мут:", e.message);
+                        // Если не удалось (нет прав), просто сбрасываем
+                        await dbRun("UPDATE spam_tracker SET count = 0, last_reset = ? WHERE peer_id = ? AND user_id = ?", [now, String(peerId), String(userId)]);
+                    }
+                } else {
+                    await dbRun("REPLACE INTO spam_tracker (peer_id, user_id, count, last_reset) VALUES (?, ?, ?, ?)", [String(peerId), String(userId), msgCount, lastReset]);
+                }
+            }
+        }
+
+        // --- ОБРАБОТКА ВВОДА НАСТРОЕК (ДЛЯ АДМИНА) ---
+        if (userId === ADMIN_ID && adminStates.has(userId)) {
+            const state = adminStates.get(userId);
+            const val = parseFloat(cleanText);
+            if (!isNaN(val) && val > 0) {
+                await dbRun("UPDATE settings SET value = ? WHERE key = ?", [String(val), state]);
+                adminStates.delete(userId);
+                
+                const enabled = (await dbGet("SELECT value FROM settings WHERE key = 'antispam_enabled'")).value;
+                const limit = (await dbGet("SELECT value FROM settings WHERE key = 'antispam_limit'")).value;
+                const time = (await dbGet("SELECT value FROM settings WHERE key = 'antispam_time'")).value;
+                const mute = (await dbGet("SELECT value FROM settings WHERE key = 'antispam_mute'")).value;
+
+                return await message.reply("✅ Настройки сохранены!", {
+                    keyboard: await getSettingsKb(enabled, limit, time, mute)
+                });
+            } else {
+                return await message.reply("❌ Введите корректное число больше 0.");
+            }
+        }
+
         // Разрешаем команды без слэша
-        const validCmds = ['стакан', 'кубик', 'монетка', 'дрим', 'краш', 'рулетка', 'рул', 'автомат', 'блэкджек', 'мины', 'топ', 'профиль', 'баланс', 'бизнес', 'машины', 'работа', 'бонус', 'фортуна', 'казино', 'help', 'помощь', 'start', 'начать', 'transfer', 'перевод', 'duel', 'вывести', 'мойбизнес', 'закрыть', 'rep', 'реп', 'промолист', 'promo', 'купить', 'купитьбиз', 'чсб', 'разчсб', 'kick', 'выдать', 'обнулить', 'создать', 'cp', 'ping', 'пинг'];
+        const validCmds = ['стакан', 'кубик', 'монетка', 'дрим', 'краш', 'рулетка', 'рул', 'автомат', 'блэкджек', 'мины', 'топ', 'профиль', 'баланс', 'бизнес', 'машины', 'работа', 'бонус', 'фортуна', 'казино', 'help', 'помощь', 'start', 'начать', 'transfer', 'перевод', 'duel', 'вывести', 'мойбизнес', 'закрыть', 'rep', 'реп', 'промолист', 'promo', 'купить', 'купитьбиз', 'чсб', 'разчсб', 'kick', 'выдать', 'обнулить', 'создать', 'cp', 'ping', 'пинг', 'убрать', 'настройки'];
         const isMainButton = text.includes('работа') || text.includes('рулетка') || text.includes('профиль') || text.includes('топ');
 
         if (!text.startsWith('/') && !validCmds.includes(cmdWord) && !isMainButton) {
@@ -463,7 +563,6 @@ vk.updates.on('message_new', async (message) => {
         // --- PING ---
         if (cleanText === 'ping' || cleanText === 'пинг') {
             const start = Date.now();
-            // Легкий запрос для замера пинга
             try { await vk.api.users.get({ user_ids: userId }); } catch (e) {}
             const ping = Date.now() - start;
             
@@ -711,8 +810,18 @@ vk.updates.on('message_new', async (message) => {
             return await message.reply("💼 Выберите работу:", replyParams(getWorkKb()));
         }
 
+        // --- 10-СЕКУНДНЫЙ КУЛДАУН ДЛЯ ВСЕХ ИГР ---
+        const gameCmds = ['рулетка', 'рул', 'краш', 'монетка', 'стакан', 'кубик', 'автомат', 'блэкджек', 'дрим', 'мины', 'фортуна'];
+        if (gameCmds.some(cmd => cleanText.startsWith(cmd))) {
+            const lastPlayed = gameCooldowns.get(userId) || 0;
+            if (Date.now() - lastPlayed < 10000) {
+                const left = Math.ceil((10000 - (Date.now() - lastPlayed)) / 1000);
+                return await message.reply(`⏳ Подождите ${left} сек. перед началом новой игры.`, replyParams());
+            }
+            gameCooldowns.set(userId, Date.now());
+        }
+
         // --- ИГРЫ КАЗИНО ---
-        
         if (cleanText.startsWith('краш')) {
             if (parts.length >= 3) {
                 const autoStop = parseFloat(parts[1]);
@@ -1043,6 +1152,28 @@ vk.updates.on('message_new', async (message) => {
 
         // ===== АДМИНСКИЕ КОМАНДЫ =====
         if (userId === ADMIN_ID) {
+            if (cleanText === 'настройки') {
+                const enabled = (await dbGet("SELECT value FROM settings WHERE key = 'antispam_enabled'")).value;
+                const limit = (await dbGet("SELECT value FROM settings WHERE key = 'antispam_limit'")).value;
+                const time = (await dbGet("SELECT value FROM settings WHERE key = 'antispam_time'")).value;
+                const mute = (await dbGet("SELECT value FROM settings WHERE key = 'antispam_mute'")).value;
+
+                return await message.reply("⚙️ Настройки антиспама:\n\nНажмите на кнопку ниже, чтобы изменить значение.", {
+                    keyboard: await getSettingsKb(enabled, limit, time, mute)
+                });
+            }
+
+            if (cleanText.startsWith('убрать')) {
+                const { targetId } = await getTargetAndReason(message, 'убрать');
+                if (!targetId) return await message.reply("⚠️ Ответьте на сообщение игрока или укажите его @упоминание, чтобы обнулить его статы.", replyParams());
+
+                // Обнуляем все, КРОМЕ бизнесов и машин
+                await dbRun("UPDATE users SET balance = 0, reputation = 0, xp = 0, level = 1, duel_wins = 0, bonus_count = 0 WHERE user_id = ?", [String(targetId)]);
+                
+                const targetName = await getFullName(targetId);
+                return await message.reply(`💥 Все статы игрока ${targetName} (монеты, дуэли, бонусы и т.д.) успешно обнулены! (Машины и бизнесы остались)`, replyParams());
+            }
+
             if (cleanText.startsWith('kick')) {
                 if (parts.length === 1 && !message.hasReplyMessage) {
                     return await message.reply("🔔 Чтобы исключить пользователя из чата, используйте /kick @VK Причина (Пример: /kick @andrey_mala Тест)", replyParams());
@@ -1269,7 +1400,48 @@ vk.updates.on('message_event', async (context) => {
             }
         }
 
-        // МЕНЮ HELP (ТЕПЕРЬ ПЕРЕКЛЮЧАЕТСЯ)
+        // --- НАСТРОЙКИ АНТИСПАМА ---
+        if (payload.cmd === 'settings_toggle') {
+            if (userId !== ADMIN_ID) return await safeAnswer({ type: 'show_snackbar', text: '❌ Только владелец.' });
+            
+            const current = (await dbGet("SELECT value FROM settings WHERE key = 'antispam_enabled'")).value;
+            const newVal = current === '1' ? '0' : '1';
+            await dbRun("UPDATE settings SET value = ? WHERE key = 'antispam_enabled'", [newVal]);
+            
+            await safeAnswer();
+            const limit = (await dbGet("SELECT value FROM settings WHERE key = 'antispam_limit'")).value;
+            const time = (await dbGet("SELECT value FROM settings WHERE key = 'antispam_time'")).value;
+            const mute = (await dbGet("SELECT value FROM settings WHERE key = 'antispam_mute'")).value;
+
+            await vk.api.messages.edit({
+                peer_id: context.peerId,
+                message: "⚙️ Настройки антиспама:\n\nНажмите на кнопку ниже, чтобы изменить значение.",
+                keyboard: await getSettingsKb(newVal, limit, time, mute),
+                conversation_message_id: context.conversationMessageId
+            });
+            return;
+        }
+
+        if (payload.cmd === 'settings_edit') {
+            if (userId !== ADMIN_ID) return await safeAnswer({ type: 'show_snackbar', text: '❌ Только владелец.' });
+            
+            await safeAnswer();
+            adminStates.set(userId, payload.field); // Устанавливаем стейт
+            
+            let fieldName = "";
+            if (payload.field === 'limit') fieldName = "лимит сообщений (например, 5)";
+            if (payload.field === 'time') fieldName = "время в секундах (например, 60)";
+            if (payload.field === 'mute') fieldName = "время мута в минутах (например, 10)";
+
+            await vk.api.messages.send({
+                peer_id: context.peerId,
+                message: `✏️ Введите новое значение: ${fieldName}`,
+                random_id: Math.floor(Math.random() * 1000000000)
+            });
+            return;
+        }
+
+        // --- МЕНЮ HELP ---
         if (payload.cmd === 'help_start') {
             await safeAnswer();
             await vk.api.messages.edit({
