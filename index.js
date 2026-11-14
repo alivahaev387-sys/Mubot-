@@ -172,7 +172,7 @@ async function getTargetAndReason(message, cmdName) {
 }
 
 // ===== ГЕНЕРАТОР ТЕКСТА И КЛАВИАТУРЫ ДЛЯ МИН =====
-function getMinesGameUI(bet, minesCount, opened, isLoss = false, hitCell = null, name = "", balance = 0, timeLeft = 60) {
+function getMinesGameUI(gameId, bet, minesCount, minesArr, opened, isLoss = false, hitCell = null, name = "", balance = 0, timeLeft = 60) {
     const totalSafe = 9 - minesCount;
     const currentOpened = opened.length;
 
@@ -199,7 +199,7 @@ function getMinesGameUI(bet, minesCount, opened, isLoss = false, hitCell = null,
         const lostMoney = currentMoney;
         return {
             text: `💥 **БАБАХ! ПОРАЖЕНИЕ**\n────────────────────\n👤 ${name} наступил(а) на мину!\n💣 Мин на поле: ${minesCount}\n✅ Успел(а) открыть: ${currentOpened}\n\n📉 Потеряно: -${bet} 💰\n😢 Не забрал(а): ${lostMoney} 💰 (x${currentMult})\n💳 Баланс: ${formatMoney(balance)} 💰\n\n💬 Бывает. Следующая будет твоей 🍀`,
-            kb: buildMinesKb(null, opened, mines, true, hitCell)
+            kb: buildMinesKb(gameId, opened, minesArr, true, hitCell)
         };
     } else {
         const randomPhrases = [
@@ -213,7 +213,7 @@ function getMinesGameUI(bet, minesCount, opened, isLoss = false, hitCell = null,
 
         return {
             text: `💣 **МИНЫ**\n────────────────────\n👤 ${name}\n💵 Ставка: ${bet} | 💣 Мин: ${minesCount}\n\n${progressBar} ${currentOpened}/${totalSafe}\n📈 Сейчас: x${currentMult.toFixed(2)} → ${currentMoney} 💰\n🎯 Следующая: x${nextMult.toFixed(2)} → ${nextMoney} 💰\n🍀 Шанс безопасной клетки: ${chance}%\n⏱ Осталось: ${timeLeft} сек.\n\n💬 ${phrase}`,
-            kb: buildMinesKb(null, opened, mines, false, null, currentMoney)
+            kb: buildMinesKb(gameId, opened, minesArr, false, null, currentMoney)
         };
     }
 }
@@ -970,7 +970,6 @@ vk.updates.on('message_event', async (context) => {
                 const remaining = 3600000 - (now - lastReset);
                 const m = Math.floor(remaining / 60000);
                 const s = Math.floor((remaining % 60000) / 1000);
-                // Отправляем сообщение в чат, так как снекбар может вызвать ошибку
                 return await context.editMessage({ message: `⏳ Вы отработали 3 раза. Ждите ${m} мин. ${s} сек.`, keyboard: getWorkKb() });
             }
 
@@ -1219,7 +1218,8 @@ vk.updates.on('message_event', async (context) => {
                 await dbRun("UPDATE games SET mines = ?, opened = '[]', multiplier = 1.0, start_time = ? WHERE game_id = ?", [minesStr, now, gameId]);
                 
                 const name = await getFullName(userId);
-                const ui = getMinesGameUI(row.bet, count, [], false, null, name, await getBalance(userId), 60);
+                // Передаем gameId и minesArr
+                const ui = getMinesGameUI(gameId, row.bet, count, minesArr, [], false, null, name, await getBalance(userId), 60);
                 
                 await context.editMessage({
                     message: ui.text,
@@ -1228,7 +1228,6 @@ vk.updates.on('message_event', async (context) => {
                 return;
             } catch(e) {
                 console.error("Ошибка при старте мин:", e);
-                // Если не удалось отредактировать, отправляем новое сообщение
                 await vk.api.messages.send({
                     peer_id: context.peerId,
                     message: "❌ Ошибка при создании игры. Попробуйте еще раз.",
@@ -1251,13 +1250,12 @@ vk.updates.on('message_event', async (context) => {
                 const opened = JSON.parse(row.opened);
                 const startTime = row.start_time;
 
-                // Проверка таймера (60 сек)
                 if (Date.now() - startTime > 60000) {
                     await updateBalance(userId, -bet);
                     await dbRun("DELETE FROM games WHERE game_id = ?", [gameId]);
                     const balance = await getBalance(userId);
                     
-                    const ui = getMinesGameUI(bet, mines.length, opened, true, null, await getFullName(userId), balance);
+                    const ui = getMinesGameUI(gameId, bet, mines.length, mines, opened, true, null, await getFullName(userId), balance);
                     let text = ui.text.replace('наступил(а) на мину!', 'не успел(а) открыть клетку!');
                     
                     await context.editMessage({
@@ -1301,7 +1299,7 @@ vk.updates.on('message_event', async (context) => {
                 const name = await getFullName(userId);
 
                 if (isLoss) {
-                    const ui = getMinesGameUI(bet, mines.length, opened, true, hitCell, name, balance);
+                    const ui = getMinesGameUI(gameId, bet, mines.length, mines, opened, true, hitCell, name, balance);
                     let text = ui.text;
                     if (hitCell === -1) {
                         text = `🏆 **ПОБЕДА!**\n────────────────────\n👤 ${name}\n💣 Мин на поле: ${mines.length}\n✅ Успел(а) открыть: ${opened.length}\n\n📈 Выигрыш: +${currentMoney} 💰 (x${(currentMoney/bet).toFixed(2)})\n💳 Баланс: ${formatMoney(balance)} 💰\n\n💬 Поздравляем! Ты забрал всё! 🎉`;
@@ -1312,7 +1310,7 @@ vk.updates.on('message_event', async (context) => {
                         keyboard: ui.kb
                     });
                 } else {
-                    const ui = getMinesGameUI(bet, mines.length, opened, false, null, name, balance);
+                    const ui = getMinesGameUI(gameId, bet, mines.length, mines, opened, false, null, name, balance);
                     const timeLeft = Math.max(0, Math.floor((60000 - (Date.now() - startTime)) / 1000));
                     let text = ui.text.replace('{TIME}', timeLeft.toString());
                     
