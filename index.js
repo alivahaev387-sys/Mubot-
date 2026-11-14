@@ -943,13 +943,13 @@ vk.updates.on('message_event', async (context) => {
         const payload = context.eventPayload;
         const userId = context.userId;
         
-        // Мы убрали context.answer() отсюда, чтобы не было двойного ответа (invalid event_id).
+        // СРАЗУ ОТВЕЧАЕМ, ЧТОБЫ УБРАТЬ ЗАГРУЗКУ И НЕ БЫЛО ОШИБКИ INVALID EVENT_ID
+        await context.answer().catch(() => {});
 
         if (payload.cmd === 'work_menu') {
             await context.editMessage({ message: "💼 Выберите работу:", keyboard: getWorkKb() });
-            return await context.answer();
+            return;
         }
-        
         if (payload.cmd === 'work_do') {
             const now = Date.now();
             const workRow = await dbGet("SELECT count, last_reset FROM work_cd WHERE user_id = ?", [String(userId)]);
@@ -970,7 +970,8 @@ vk.updates.on('message_event', async (context) => {
                 const remaining = 3600000 - (now - lastReset);
                 const m = Math.floor(remaining / 60000);
                 const s = Math.floor((remaining % 60000) / 1000);
-                return await context.answer({ type: 'show_snackbar', text: `⏳ Вы отработали 3 раза. Ждите ${m} мин. ${s} сек.` });
+                // Отправляем сообщение в чат, так как снекбар может вызвать ошибку
+                return await context.editMessage({ message: `⏳ Вы отработали 3 раза. Ждите ${m} мин. ${s} сек.`, keyboard: getWorkKb() });
             }
 
             count++;
@@ -994,7 +995,7 @@ vk.updates.on('message_event', async (context) => {
                 message: `${msgText}\n\n💰 Ваш баланс: ${formatMoney(newBal)}$\n📊 Осталось попыток: ${3 - count}/3`, 
                 keyboard: getWorkKb() 
             });
-            return await context.answer();
+            return;
         }
 
         if (payload.cmd === 'activate_bot' || payload.cmd === 'decline_bot') {
@@ -1004,29 +1005,29 @@ vk.updates.on('message_event', async (context) => {
                 const isClickerAdmin = clicker && (clicker.is_admin || clicker.is_owner);
                 
                 if (!isClickerAdmin && userId !== ADMIN_ID) {
-                    return await context.answer({ type: 'show_snackbar', text: '❌ Только администраторы беседы могут это сделать!' });
+                    return await context.editMessage({ message: "❌ Только администраторы беседы могут это сделать!", keyboard: "" });
                 }
 
                 const bot = members.items.find(m => m.member_id == -GROUP_ID || m.member_id == GROUP_ID);
                 const isBotAdmin = bot && bot.is_admin;
 
                 if (payload.cmd === 'activate_bot') {
-                    if (!isBotAdmin) return await context.answer({ type: 'show_snackbar', text: '❌ Ошибка. Убедитесь, что бот владеет статусом администратора.' });
-                    await context.editMessage({ message: "🎉 Вы подключили бота к беседе!\nЧтобы узнать подробности напишите /help", disable_mentions: 1 });
+                    if (!isBotAdmin) return await context.editMessage({ message: "❌ Ошибка. Убедитесь, что бот владеет статусом администратора.", keyboard: "" });
+                    await context.editMessage({ message: "🎉 Вы подключили бота к беседе!\nЧтобы узнать подробности напишите /help", disable_mentions: 1, keyboard: "" });
                 } else {
-                    await context.editMessage({ message: "❌ Активация отменена. Чтобы начать работу, добавьте бота заново.", disable_mentions: 1 });
+                    await context.editMessage({ message: "❌ Активация отменена. Чтобы начать работу, добавьте бота заново.", disable_mentions: 1, keyboard: "" });
                 }
-                return await context.answer();
+                return;
             } catch (e) {
-                return await context.answer({ type: 'show_snackbar', text: '❌ Ошибка при проверке прав.' });
+                return await context.editMessage({ message: "❌ Ошибка при проверке прав.", keyboard: "" });
             }
         }
 
         if (payload.cmd === 'biz_upgrade') {
-            if (String(context.userId) !== String(payload.author)) return await context.answer({ type: 'show_snackbar', text: '❌ Это не ваш бизнес!' });
+            if (String(context.userId) !== String(payload.author)) return await context.editMessage({ message: "❌ Это не ваш бизнес!", keyboard: "" });
             
             const biz = await dbGet("SELECT * FROM businesses WHERE user_id = ?", [String(userId)]);
-            if (!biz) return await context.answer({ type: 'show_snackbar', text: '❌ У вас нет бизнеса.' });
+            if (!biz) return await context.editMessage({ message: "❌ У вас нет бизнеса.", keyboard: "" });
 
             const bizData = Object.values(BIZ_DATA).find(b => b.name === biz.biz_name) || { name: biz.biz_name, baseIncome: 1000 };
             const timePassed = Date.now() - biz.last_income;
@@ -1035,8 +1036,8 @@ vk.updates.on('message_event', async (context) => {
             const nextLevelCost = (Number(biz.level) === 1 ? 2000000 : Number(biz.level) === 2 ? 5000000 : Number(biz.level) * 5000000);
 
             const userBal = await getBalance(userId);
-            if (biz.level >= 5) return await context.answer({ type: 'show_snackbar', text: '❌ Максимальный уровень!' });
-            if (userBal < nextLevelCost) return await context.answer({ type: 'show_snackbar', text: '❌ Не хватает денег на балансе!' });
+            if (biz.level >= 5) return await context.editMessage({ message: "❌ Максимальный уровень!", keyboard: "" });
+            if (userBal < nextLevelCost) return await context.editMessage({ message: "❌ Не хватает денег на балансе!", keyboard: "" });
 
             await updateBalance(userId, -nextLevelCost);
             await dbRun("UPDATE businesses SET level = level + 1, balance = ?, last_income = ? WHERE user_id = ?", [totalBalance, Date.now(), String(userId)]);
@@ -1046,12 +1047,12 @@ vk.updates.on('message_event', async (context) => {
             try {
                 await context.editMessage({ message: newMsgText, keyboard: getBizKb(userId), disable_mentions: 1 });
             } catch(e) {}
-            return await context.answer();
+            return;
         }
 
         if (payload.cmd === 'top_menu') {
             if (String(context.userId) !== String(payload.author)) {
-                return await context.answer({ type: 'show_snackbar', text: '❌ Это меню вызвано другим пользователем.' });
+                return await context.editMessage({ message: "❌ Это меню вызвано другим пользователем.", keyboard: "" });
             }
 
             const type = payload.type;
@@ -1093,7 +1094,7 @@ vk.updates.on('message_event', async (context) => {
 
             if (rows.length === 0) {
                 await context.editMessage({ message: "❌ Топ пуст.", keyboard: getTopKb(payload.author, type, scope, repType) });
-                return await context.answer();
+                return;
             }
 
             const userIds = rows.map(r => r.user_id);
@@ -1131,11 +1132,11 @@ vk.updates.on('message_event', async (context) => {
                 keyboard: getTopKb(payload.author, type, scope, repType),
                 disable_mentions: 1
             });
-            return await context.answer();
+            return;
         }
 
         if (payload.cmd === 'top_back') {
-            if (String(context.userId) !== String(payload.author)) return await context.answer({ type: 'show_snackbar', text: '❌ Это меню вызвано другим пользователем.' });
+            if (String(context.userId) !== String(payload.author)) return await context.editMessage({ message: "❌ Это меню вызвано другим пользователем.", keyboard: "" });
             
             const rows = await dbAll("SELECT user_id, count FROM chat_messages WHERE peer_id = ? ORDER BY count DESC LIMIT 10", [String(context.peerId)]);
             let topText = "⭐ ТОП 10 ПОЛЬЗОВАТЕЛЕЙ ПО СООБЩЕНИЯМ\n\n";
@@ -1162,7 +1163,7 @@ vk.updates.on('message_event', async (context) => {
                 keyboard: getTopKb(payload.author, 'coins', 'chat'),
                 disable_mentions: 1
             });
-            return await context.answer();
+            return;
         }
 
         if (payload.cmd === 'duel_accept') {
@@ -1170,8 +1171,8 @@ vk.updates.on('message_event', async (context) => {
             const row = await dbGet("SELECT challenger, bet FROM active_duels WHERE msg_id = ?", [duelId]);
             
             if (row) {
-                if (String(userId) === row.challenger) return await context.answer({ type: 'show_snackbar', text: '❌ Нельзя драться с собой!' });
-                if (await getBalance(userId) < row.bet) return await context.answer({ type: 'show_snackbar', text: '❌ Не хватает денег!' });
+                if (String(userId) === row.challenger) return await context.editMessage({ message: "❌ Нельзя драться с собой!", keyboard: "" });
+                if (await getBalance(userId) < row.bet) return await context.editMessage({ message: "❌ Не хватает денег!", keyboard: "" });
                 
                 const winnerId = Math.random() < 0.5 ? parseInt(row.challenger) : userId;
                 const loserId = winnerId === userId ? parseInt(row.challenger) : userId;
@@ -1192,7 +1193,7 @@ vk.updates.on('message_event', async (context) => {
                     keyboard: "",
                     disable_mentions: 1
                 });
-                return await context.answer({ type: 'show_snackbar', text: '⚔️ Дуэль завершена!' });
+                return;
             }
         }
 
@@ -1204,7 +1205,7 @@ vk.updates.on('message_event', async (context) => {
             try {
                 const row = await dbGet("SELECT bet FROM games WHERE game_id = ? AND user_id = ?", [gameId, String(userId)]);
                 if (!row) {
-                    return await context.answer({ type: 'show_snackbar', text: '❌ Игра устарела. Введите /мины заново.' });
+                    return await context.editMessage({ message: "❌ Игра устарела. Введите /мины заново.", keyboard: "" });
                 }
 
                 const minesArr = [];
@@ -1224,9 +1225,16 @@ vk.updates.on('message_event', async (context) => {
                     message: ui.text,
                     keyboard: ui.kb
                 });
-                return await context.answer();
+                return;
             } catch(e) {
-                return await context.answer({ type: 'show_snackbar', text: '❌ Ошибка при создании игры.' });
+                console.error("Ошибка при старте мин:", e);
+                // Если не удалось отредактировать, отправляем новое сообщение
+                await vk.api.messages.send({
+                    peer_id: context.peerId,
+                    message: "❌ Ошибка при создании игры. Попробуйте еще раз.",
+                    random_id: Math.floor(Math.random() * 1000000000)
+                });
+                return;
             }
         }
 
@@ -1236,7 +1244,7 @@ vk.updates.on('message_event', async (context) => {
             
             try {
                 const row = await dbGet("SELECT bet, mines, opened, multiplier, start_time FROM games WHERE game_id = ? AND user_id = ?", [gameId, String(userId)]);
-                if (!row) return await context.answer({ type: 'show_snackbar', text: '❌ Игра завершена.' });
+                if (!row) return; // Игра завершена
 
                 const bet = row.bet;
                 const mines = JSON.parse(row.mines);
@@ -1256,10 +1264,10 @@ vk.updates.on('message_event', async (context) => {
                         message: text,
                         keyboard: ui.kb
                     });
-                    return await context.answer({ type: 'show_snackbar', text: '⏱ Время вышло! Вы проиграли.' });
+                    return;
                 }
                 
-                if (opened.includes(cell)) return await context.answer({ type: 'show_snackbar', text: '❌ Клетка уже открыта!' });
+                if (opened.includes(cell)) return;
 
                 opened.push(cell);
                 let isLoss = false;
@@ -1303,7 +1311,6 @@ vk.updates.on('message_event', async (context) => {
                         message: text,
                         keyboard: ui.kb
                     });
-                    return await context.answer({ type: 'show_snackbar', text: hitCell === -1 ? '🏆 ПОБЕДА!' : '💥 БУМ! Вы проиграли.' });
                 } else {
                     const ui = getMinesGameUI(bet, mines.length, opened, false, null, name, balance);
                     const timeLeft = Math.max(0, Math.floor((60000 - (Date.now() - startTime)) / 1000));
@@ -1313,10 +1320,11 @@ vk.updates.on('message_event', async (context) => {
                         message: text,
                         keyboard: ui.kb
                     });
-                    return await context.answer({ type: 'show_snackbar', text: `💎 Алмаз! Текущий кэш: ${currentMoney}$` });
                 }
+                return;
             } catch (e) {
-                return await context.answer({ type: 'show_snackbar', text: '❌ Ошибка при клике.' });
+                console.error("Ошибка при клике в минах:", e);
+                return;
             }
         }
 
@@ -1325,7 +1333,7 @@ vk.updates.on('message_event', async (context) => {
             
             try {
                 const row = await dbGet("SELECT bet, multiplier, mines, opened FROM games WHERE game_id = ? AND user_id = ?", [gameId, String(userId)]);
-                if (!row) return await context.answer({ type: 'show_snackbar', text: '❌ Игра завершена.' });
+                if (!row) return;
 
                 const winAmount = Math.floor(row.bet * row.multiplier);
                 await updateBalance(userId, winAmount);
@@ -1341,15 +1349,15 @@ vk.updates.on('message_event', async (context) => {
                     message: msgText,
                     keyboard: buildMinesKb(gameId, opened, mines, true, null)
                 });
-                return await context.answer({ type: 'show_snackbar', text: `💰 Вы забрали ${winAmount}$!` });
+                return;
             } catch(e) {
-                return await context.answer({ type: 'show_snackbar', text: '❌ Ошибка при выводе.' });
+                console.error("Ошибка при выводе в минах:", e);
+                return;
             }
         }
 
     } catch (e) {
         console.error("КРИТИЧЕСКАЯ Ошибка в кнопках:", e);
-        try { await context.answer({ type: 'show_snackbar', text: '❌ Произошла ошибка.' }); } catch(err) {}
     }
 });
 
