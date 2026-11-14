@@ -316,7 +316,9 @@ const getHelpBackKb = () => Keyboard.builder().inline()
 
 const getSettingsKb = async (enabled, limit, time, mute) => {
     const kb = Keyboard.builder().inline();
-    kb.callbackButton({ label: enabled === '1' ? '🟢 Вкл' : '🔴 Выкл', payload: { cmd: 'settings_toggle' }, color: enabled === '1' ? Keyboard.POSITIVE_COLOR : Keyboard.NEGATIVE_COLOR });
+    // Две отдельные кнопки для Включения и Выключения
+    kb.callbackButton({ label: '🟢 Включить', payload: { cmd: 'settings_toggle', state: '1' }, color: enabled === '1' ? Keyboard.POSITIVE_COLOR : Keyboard.SECONDARY_COLOR });
+    kb.callbackButton({ label: '🔴 Выключить', payload: { cmd: 'settings_toggle', state: '0' }, color: enabled === '0' ? Keyboard.NEGATIVE_COLOR : Keyboard.SECONDARY_COLOR });
     kb.row();
     kb.callbackButton({ label: `Лимит: ${limit}`, payload: { cmd: 'settings_edit', field: 'limit' }, color: Keyboard.SECONDARY_COLOR });
     kb.callbackButton({ label: `Время (сек): ${time}`, payload: { cmd: 'settings_edit', field: 'time' }, color: Keyboard.SECONDARY_COLOR });
@@ -450,12 +452,14 @@ vk.updates.on('message_new', async (message) => {
                             action: 'mute',
                             for: muteMin * 60
                         });
-                        await message.reply(`🤐 ${await getFullName(userId)} замучен на ${muteMin} мин. за флуд.`);
+                        
+                        // Обновленный текст
+                        await message.reply(`🚫 [id${userId}|Игрок] получил блокировку чата на ${muteMin} минут за нарушение антиспама.`);
                         await dbRun("UPDATE spam_tracker SET count = 0, last_reset = ? WHERE peer_id = ? AND user_id = ?", [now, String(peerId), String(userId)]);
                         return; // Останавливаем обработку сообщения
                     } catch(e) {
                         console.error("Не удалось выдать мут:", e.message);
-                        // Если не удалось (нет прав), просто сбрасываем
+                        // Если не удалось выдать мут, просто сбрасываем счетчик
                         await dbRun("UPDATE spam_tracker SET count = 0, last_reset = ? WHERE peer_id = ? AND user_id = ?", [now, String(peerId), String(userId)]);
                     }
                 } else {
@@ -477,7 +481,9 @@ vk.updates.on('message_new', async (message) => {
                 const time = (await dbGet("SELECT value FROM settings WHERE key = 'antispam_time'")).value;
                 const mute = (await dbGet("SELECT value FROM settings WHERE key = 'antispam_mute'")).value;
 
-                return await message.reply("✅ Настройки сохранены!", {
+                let statusText = enabled === '1' ? "🟢 Включен" : "🔴 Выключен";
+
+                return await message.reply(`✅ Настройки сохранены!\n\n⚙️ Настройки антиспама:\nСтатус: ${statusText}`, {
                     keyboard: await getSettingsKb(enabled, limit, time, mute)
                 });
             } else {
@@ -1158,20 +1164,28 @@ vk.updates.on('message_new', async (message) => {
                 const time = (await dbGet("SELECT value FROM settings WHERE key = 'antispam_time'")).value;
                 const mute = (await dbGet("SELECT value FROM settings WHERE key = 'antispam_mute'")).value;
 
-                return await message.reply("⚙️ Настройки антиспама:\n\nНажмите на кнопку ниже, чтобы изменить значение.", {
+                let statusText = enabled === '1' ? "🟢 Включен" : "🔴 Выключен";
+
+                return await message.reply(`⚙️ Настройки антиспама:\n\nСтатус: ${statusText}\n\nНажмите на кнопку, чтобы изменить параметр.`, {
                     keyboard: await getSettingsKb(enabled, limit, time, mute)
                 });
             }
 
             if (cleanText.startsWith('убрать')) {
-                const { targetId } = await getTargetAndReason(message, 'убрать');
-                if (!targetId) return await message.reply("⚠️ Ответьте на сообщение игрока или укажите его @упоминание, чтобы обнулить его статы.", replyParams());
-
-                // Обнуляем все, КРОМЕ бизнесов и машин
-                await dbRun("UPDATE users SET balance = 0, reputation = 0, xp = 0, level = 1, duel_wins = 0, bonus_count = 0 WHERE user_id = ?", [String(targetId)]);
+                const targetQuery = cleanText.replace('убрать', '').trim().toLowerCase();
                 
-                const targetName = await getFullName(targetId);
-                return await message.reply(`💥 Все статы игрока ${targetName} (монеты, дуэли, бонусы и т.д.) успешно обнулены! (Машины и бизнесы остались)`, replyParams());
+                if (targetQuery === 'all' || targetQuery === 'все' || targetQuery === 'всем') {
+                    await dbRun("UPDATE users SET balance = 0, reputation = 0, xp = 0, level = 1, duel_wins = 0, bonus_count = 0");
+                    return await message.reply(`💥 Все статы ВСЕХ игроков (монеты, дуэли, бонусы и т.д.) успешно обнулены! (Машины и бизнесы остались)`, replyParams());
+                } else {
+                    const { targetId } = await getTargetAndReason(message, 'убрать');
+                    if (!targetId) return await message.reply("⚠️ Ответьте на сообщение игрока, укажите его @упоминание или напишите 'all', чтобы обнулить статы.", replyParams());
+
+                    await dbRun("UPDATE users SET balance = 0, reputation = 0, xp = 0, level = 1, duel_wins = 0, bonus_count = 0 WHERE user_id = ?", [String(targetId)]);
+                    
+                    const targetName = await getFullName(targetId);
+                    return await message.reply(`💥 Все статы игрока ${targetName} (монеты, дуэли, бонусы и т.д.) успешно обнулены! (Машины и бизнесы остались)`, replyParams());
+                }
             }
 
             if (cleanText.startsWith('kick')) {
@@ -1404,8 +1418,7 @@ vk.updates.on('message_event', async (context) => {
         if (payload.cmd === 'settings_toggle') {
             if (userId !== ADMIN_ID) return await safeAnswer({ type: 'show_snackbar', text: '❌ Только владелец.' });
             
-            const current = (await dbGet("SELECT value FROM settings WHERE key = 'antispam_enabled'")).value;
-            const newVal = current === '1' ? '0' : '1';
+            const newVal = payload.state; // '1' или '0' из payload
             await dbRun("UPDATE settings SET value = ? WHERE key = 'antispam_enabled'", [newVal]);
             
             await safeAnswer();
@@ -1413,9 +1426,11 @@ vk.updates.on('message_event', async (context) => {
             const time = (await dbGet("SELECT value FROM settings WHERE key = 'antispam_time'")).value;
             const mute = (await dbGet("SELECT value FROM settings WHERE key = 'antispam_mute'")).value;
 
+            let statusText = newVal === '1' ? "🟢 Включен" : "🔴 Выключен";
+
             await vk.api.messages.edit({
                 peer_id: context.peerId,
-                message: "⚙️ Настройки антиспама:\n\nНажмите на кнопку ниже, чтобы изменить значение.",
+                message: `⚙️ Настройки антиспама:\n\nСтатус: ${statusText}\n\nНажмите на кнопку, чтобы изменить параметр.`,
                 keyboard: await getSettingsKb(newVal, limit, time, mute),
                 conversation_message_id: context.conversationMessageId
             });
