@@ -943,7 +943,18 @@ vk.updates.on('message_event', async (context) => {
         const payload = context.eventPayload;
         const userId = context.userId;
         
-        // СРАЗУ ОТВЕЧАЕМ, ЧТОБЫ УБРАТЬ ЗАГРУЗКУ И НЕ БЫЛО ОШИБКИ INVALID EVENT_ID
+        // ПРОВЕРКА АВТОРА ДО ОТВЕТА НА КНОПКУ (чтобы не редактировать чужое сообщение)
+        if ((payload.cmd === 'top_menu' || payload.cmd === 'top_back' || payload.cmd === 'biz_upgrade') && payload.author) {
+            if (String(userId) !== String(payload.author)) {
+                // Показываем всплывающее окошко (снекбар) только нажавшему
+                return await context.answer({
+                    type: 'show_snackbar',
+                    text: '❌ Это меню вызвано другим пользователем.'
+                });
+            }
+        }
+
+        // СРАЗУ ОТВЕЧАЕМ, ЧТОБЫ УБРАТЬ ЗАГРУЗКУ И НЕ БЫЛО ОШИБКИ INVALID EVENT_ID (если проверка выше пройдена)
         await context.answer().catch(() => {});
 
         if (payload.cmd === 'work_menu') {
@@ -1062,13 +1073,7 @@ vk.updates.on('message_event', async (context) => {
         }
 
         if (payload.cmd === 'biz_upgrade') {
-            if (String(context.userId) !== String(payload.author)) return await vk.api.messages.edit({
-                peer_id: context.peerId,
-                message: "❌ Это не ваш бизнес!",
-                keyboard: "",
-                conversation_message_id: context.conversationMessageId
-            });
-            
+            // Проверка автора уже прошла выше
             const biz = await dbGet("SELECT * FROM businesses WHERE user_id = ?", [String(userId)]);
             if (!biz) return await vk.api.messages.edit({
                 peer_id: context.peerId,
@@ -1115,15 +1120,7 @@ vk.updates.on('message_event', async (context) => {
         }
 
         if (payload.cmd === 'top_menu') {
-            if (String(context.userId) !== String(payload.author)) {
-                return await vk.api.messages.edit({
-                    peer_id: context.peerId,
-                    message: "❌ Это меню вызвано другим пользователем.",
-                    keyboard: "",
-                    conversation_message_id: context.conversationMessageId
-                });
-            }
-
+            // Проверка автора уже прошла выше
             const type = payload.type;
             const scope = payload.scope;
             const repType = payload.repType || 'pos';
@@ -1212,13 +1209,7 @@ vk.updates.on('message_event', async (context) => {
         }
 
         if (payload.cmd === 'top_back') {
-            if (String(context.userId) !== String(payload.author)) return await vk.api.messages.edit({
-                peer_id: context.peerId,
-                message: "❌ Это меню вызвано другим пользователем.",
-                keyboard: "",
-                conversation_message_id: context.conversationMessageId
-            });
-            
+            // Проверка автора уже прошла выше
             const rows = await dbAll("SELECT user_id, count FROM chat_messages WHERE peer_id = ? ORDER BY count DESC LIMIT 10", [String(context.peerId)]);
             let topText = "⭐ ТОП 10 ПОЛЬЗОВАТЕЛЕЙ ПО СООБЩЕНИЯМ\n\n";
             
