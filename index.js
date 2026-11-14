@@ -273,7 +273,6 @@ const getWorkKb = () => Keyboard.builder().inline()
     .callbackButton({ label: '🔫 Охота', payload: { cmd: 'work_do', type: 'Охота' }, color: Keyboard.POSITIVE_COLOR })
     .toString();
 
-// КАЗИНО МЕНЮ
 const getCasinoKb = () => Keyboard.builder().inline()
     .callbackButton({ label: 'Рулетка', payload: { cmd: 'casino_info', game: 'roulette' }, color: Keyboard.SECONDARY_COLOR })
     .callbackButton({ label: 'Краш', payload: { cmd: 'casino_info', game: 'crash' }, color: Keyboard.SECONDARY_COLOR })
@@ -369,8 +368,17 @@ vk.updates.on('message_new', async (message) => {
         const peerId = message.peerId;
         const isLs = peerId === userId;
 
+        const cleanText = text.replace(/\//g, '').trim();
+        const parts = cleanText.split(/\s+/);
+        const cmdWord = parts[0];
+
+        // Разрешаем команды без слэша
+        const validCmds = ['стакан', 'кубик', 'монетка', 'дрим', 'краш', 'рулетка', 'рул', 'автомат', 'блэкджек', 'мины', 'топ', 'профиль', 'баланс', 'бизнес', 'машины', 'работа', 'бонус', 'фортуна', 'казино', 'help', 'помощь', 'start', 'начать', 'transfer', 'перевод', 'duel', 'вывести', 'мойбизнес', 'закрыть', 'rep', 'реп', 'промолист', 'promo', 'купить', 'купитьбиз', 'чсб', 'разчсб', 'kick', 'выдать', 'обнулить', 'создать', 'cp'];
         const isMainButton = text.includes('работа') || text.includes('рулетка') || text.includes('профиль') || text.includes('топ');
-        if (!text.startsWith('/') && !isMainButton) return;
+
+        if (!text.startsWith('/') && !validCmds.includes(cmdWord) && !isMainButton) {
+            return; 
+        }
 
         // --- СИСТЕМА УРОВНЕЙ (XP) ---
         let userRow = await dbGet("SELECT xp, level, reg_date FROM users WHERE user_id = ?", [String(userId)]);
@@ -407,9 +415,6 @@ vk.updates.on('message_new', async (message) => {
             }
         }
 
-        const cleanText = text.replace(/\//g, '').trim();
-        const parts = cleanText.split(/\s+/);
-
         const balance = await getBalance(userId);
         const rep = await getReputation(userId);
 
@@ -439,7 +444,7 @@ vk.updates.on('message_new', async (message) => {
 
         // --- HELP ---
         if (text.includes('help') || text.includes('помощь') || text.includes('команды')) {
-            const helpText = "📖 Команды:\n🎰 /казино (Меню игр)\n🎲 /фортуна (100$)\n💣 /мины [ставка]\n⚔️ /duel [сумма]\n💸 /transfer [сумма] (ответом)\n🎁 /бонус\n🎁 /promo [код]\n📜 /промолист\n👤 /профиль\n🏆 /топ\n🏢 /бизнес\n🛒 /купитьбиз [название]\n💼 /мойбизнес\n💸 /вывести\n💀 /закрыть бизнес\n👍 /rep +/- изменения репутации (3 раза в сутки)\n\n🚗 /машины\n🛒 /купить машина [название]";
+            const helpText = "📖 Команды:\n🎰 /казино (Меню игр)\n🎲 /рулетка [цвет/чет] [ставка]\n📈 /краш [автостоп] [ставка]\n🪙 /монетка [орел/решка] [ставка]\n🥤 /стакан [1-3] [ставка]\n🎲 /кубик [1-6] [ставка]\n🎰 /автомат [ставка]\n🃏 /блэкджек [ставка]\n💎 /дрим [число] [ставка]\n🎲 /фортуна (100$)\n💣 /мины [ставка]\n⚔️ /duel [сумма]\n💸 /transfer [сумма] (ответом)\n🎁 /бонус\n🎁 /promo [код]\n📜 /промолист\n👤 /профиль\n🏆 /топ\n🏢 /бизнес\n🛒 /купитьбиз [название]\n💼 /мойбизнес\n💸 /вывести\n💀 /закрыть бизнес\n👍 /rep +/- изменения репутации (3 раза в сутки)\n\n🚗 /машины\n🛒 /купить машина [название]\n\n💡 Слэш (/) в начале писать необязательно!";
             return await message.reply(helpText, replyParams(isLs ? mainKb : undefined));
         }
 
@@ -466,8 +471,8 @@ vk.updates.on('message_new', async (message) => {
 
         if (cleanText.startsWith('купить машина')) {
             const args = message.text.split(' ');
-            args.shift(); // купить
-            args.shift(); // машина
+            args.shift(); 
+            args.shift(); 
             const query = args.join(' ').toLowerCase().trim();
 
             if (!query) return await message.reply("❌ Укажите название машины. Пример: /купить машина м5 ф90");
@@ -680,17 +685,26 @@ vk.updates.on('message_new', async (message) => {
             return await message.reply("💼 Выберите работу:", replyParams(getWorkKb()));
         }
 
-        // --- НОВЫЕ ИГРЫ В КАЗИНО ---
+        // --- ИГРЫ КАЗИНО ---
         
         if (cleanText.startsWith('краш')) {
             if (parts.length >= 3) {
                 const autoStop = parseFloat(parts[1]);
-                let bet = parseAmount(parts[2]) === 'ALL' ? balance : parseAmount(parts[2]);
+                let betStr = parts[2];
+                let bet = parseAmount(betStr) === 'ALL' ? balance : parseAmount(betStr);
+                
                 if (isNaN(autoStop) || autoStop < 1.01) return await message.reply("❌ Автостоп должен быть больше 1.00", replyParams());
-                if (isNaN(bet) || bet < 10 || bet > balance) return await message.reply(`❌ Мин. ставка 10, у тебя ${formatMoney(balance)}$`, replyParams());
+                if (isNaN(bet) || bet < 10) return await message.reply("❌ Минимальная ставка 10$.", replyParams());
+                if (bet > balance) return await message.reply(`❌ Недостаточно средств! Ваш баланс: ${formatMoney(balance)}$.`, replyParams());
                 
                 await updateBalance(userId, -bet);
-                const crashPoint = Math.floor((Math.random() * 8 + 1) * 100) / 100;
+                
+                // Честный рандом (шанс моментального краша 3%)
+                const rand = Math.random();
+                let crashPoint = 1.00;
+                if (rand > 0.03) {
+                    crashPoint = Math.floor((1 / (1 - rand)) * 0.97 * 100) / 100;
+                }
                 
                 if (crashPoint >= autoStop) {
                     const win = Math.floor(bet * autoStop);
@@ -700,15 +714,20 @@ vk.updates.on('message_new', async (message) => {
                     return await message.reply(`📈 Краш на отметке: x${crashPoint.toFixed(2)}\n\n❌ Вы проиграли ${formatMoney(bet)}$\n💰 Баланс: ${formatMoney(await getBalance(userId))}$`, replyParams());
                 }
             }
-            return await message.reply("❌ краш (автостоп) (ставка)\n\nПример: Краш 3 вб", replyParams());
+            return await message.reply("❌ краш [автостоп] [ставка]\n\nПример: краш 3 вб", replyParams());
         }
 
         if (cleanText.startsWith('монетка')) {
             if (parts.length >= 3) {
-                const side = parts[1];
-                let bet = parseAmount(parts[2]) === 'ALL' ? balance : parseAmount(parts[2]);
-                if (isNaN(bet) || bet < 10 || bet > balance) return await message.reply(`❌ Мин. ставка 10, у тебя ${formatMoney(balance)}$`, replyParams());
-                if (!['орел', 'решка'].includes(side)) return await message.reply("❌ Выберите 'орел' или 'решка'", replyParams());
+                let side = "";
+                let betStr = "";
+                if (['орел', 'решка'].includes(parts[1])) { side = parts[1]; betStr = parts[2]; }
+                else if (['орел', 'решка'].includes(parts[2])) { side = parts[2]; betStr = parts[1]; }
+                else return await message.reply("❌ Выберите 'орел' или 'решка'", replyParams());
+
+                let bet = parseAmount(betStr) === 'ALL' ? balance : parseAmount(betStr);
+                if (isNaN(bet) || bet < 10) return await message.reply("❌ Минимальная ставка 10$.", replyParams());
+                if (bet > balance) return await message.reply(`❌ Недостаточно средств! Ваш баланс: ${formatMoney(balance)}$.`, replyParams());
                 
                 await updateBalance(userId, -bet);
                 const res = Math.random() < 0.5 ? 'орел' : 'решка';
@@ -719,15 +738,21 @@ vk.updates.on('message_new', async (message) => {
                     return await message.reply(`🪙 Выпал: ${res}\n\n❌ Вы проиграли ${formatMoney(bet)}$\n💰 Баланс: ${formatMoney(await getBalance(userId))}$`, replyParams());
                 }
             }
-            return await message.reply("❌ монетка (ставка) (орел/решка)\n\nПример: Монетка 100к орел", replyParams());
+            return await message.reply("❌ монетка [орел/решка] [ставка] или монетка [ставка] [орел/решка]\n\nПример: монетка орел 100к", replyParams());
         }
 
         if (cleanText.startsWith('стакан')) {
             if (parts.length >= 3) {
-                const cup = parseInt(parts[1]);
-                let bet = parseAmount(parts[2]) === 'ALL' ? balance : parseAmount(parts[2]);
-                if (isNaN(bet) || bet < 10 || bet > balance) return await message.reply(`❌ Мин. ставка 10, у тебя ${formatMoney(balance)}$`, replyParams());
-                if (isNaN(cup) || cup < 1 || cup > 3) return await message.reply("❌ Выберите стакан от 1 до 3", replyParams());
+                let cup = 0;
+                let betStr = "";
+                const p1 = parseInt(parts[1]), p2 = parseInt(parts[2]);
+                if (p1 >= 1 && p1 <= 3) { cup = p1; betStr = parts[2]; }
+                else if (p2 >= 1 && p2 <= 3) { cup = p2; betStr = parts[1]; }
+                else return await message.reply("❌ Выберите стакан от 1 до 3", replyParams());
+                
+                let bet = parseAmount(betStr) === 'ALL' ? balance : parseAmount(betStr);
+                if (isNaN(bet) || bet < 10) return await message.reply("❌ Минимальная ставка 10$.", replyParams());
+                if (bet > balance) return await message.reply(`❌ Недостаточно средств! Ваш баланс: ${formatMoney(balance)}$.`, replyParams());
                 
                 await updateBalance(userId, -bet);
                 const res = Math.floor(Math.random() * 3) + 1;
@@ -738,15 +763,21 @@ vk.updates.on('message_new', async (message) => {
                     return await message.reply(`🥤 Шарик был под стаканом ${res}\n\n❌ Вы проиграли ${formatMoney(bet)}$\n💰 Баланс: ${formatMoney(await getBalance(userId))}$`, replyParams());
                 }
             }
-            return await message.reply("❌ стакан (ставка) (1-3)\n\nПример: Стакан 10к 2", replyParams());
+            return await message.reply("❌ стакан [1-3] [ставка] или стакан [ставка] [1-3]\n\nПример: стакан 2 10к", replyParams());
         }
 
         if (cleanText.startsWith('кубик')) {
             if (parts.length >= 3) {
-                const guess = parseInt(parts[1]);
-                let bet = parseAmount(parts[2]) === 'ALL' ? balance : parseAmount(parts[2]);
-                if (isNaN(bet) || bet < 10 || bet > balance) return await message.reply(`❌ Мин. ставка 10, у тебя ${formatMoney(balance)}$`, replyParams());
-                if (isNaN(guess) || guess < 1 || guess > 6) return await message.reply("❌ Выберите число от 1 до 6", replyParams());
+                let guess = 0;
+                let betStr = "";
+                const p1 = parseInt(parts[1]), p2 = parseInt(parts[2]);
+                if (p1 >= 1 && p1 <= 6) { guess = p1; betStr = parts[2]; }
+                else if (p2 >= 1 && p2 <= 6) { guess = p2; betStr = parts[1]; }
+                else return await message.reply("❌ Выберите число от 1 до 6", replyParams());
+                
+                let bet = parseAmount(betStr) === 'ALL' ? balance : parseAmount(betStr);
+                if (isNaN(bet) || bet < 10) return await message.reply("❌ Минимальная ставка 10$.", replyParams());
+                if (bet > balance) return await message.reply(`❌ Недостаточно средств! Ваш баланс: ${formatMoney(balance)}$.`, replyParams());
                 
                 await updateBalance(userId, -bet);
                 const res = Math.floor(Math.random() * 6) + 1;
@@ -757,13 +788,14 @@ vk.updates.on('message_new', async (message) => {
                     return await message.reply(`🎲 Выпало: ${res}\n\n❌ Вы проиграли ${formatMoney(bet)}$\n💰 Баланс: ${formatMoney(await getBalance(userId))}$`, replyParams());
                 }
             }
-            return await message.reply("❌ кубик (ставка) (1-6)\n\nПример: Кубик 10к 4", replyParams());
+            return await message.reply("❌ кубик [1-6] [ставка] или кубик [ставка] [1-6]\n\nПример: кубик 4 10к", replyParams());
         }
 
         if (cleanText.startsWith('автомат')) {
             if (parts.length >= 2) {
                 let bet = parseAmount(parts[1]) === 'ALL' ? balance : parseAmount(parts[1]);
-                if (isNaN(bet) || bet < 10 || bet > balance) return await message.reply(`❌ Мин. ставка 10, у тебя ${formatMoney(balance)}$`, replyParams());
+                if (isNaN(bet) || bet < 10) return await message.reply("❌ Минимальная ставка 10$.", replyParams());
+                if (bet > balance) return await message.reply(`❌ Недостаточно средств! Ваш баланс: ${formatMoney(balance)}$.`, replyParams());
                 
                 await updateBalance(userId, -bet);
                 const emojis = ['🍒', '🍋', '🍇', '💎', '7️⃣'];
@@ -782,20 +814,20 @@ vk.updates.on('message_new', async (message) => {
                     return await message.reply(`🎰 [ ${r1} | ${r2} | ${r3} ]\n\n❌ Вы проиграли ${formatMoney(bet)}$\n💰 Баланс: ${formatMoney(await getBalance(userId))}$`, replyParams());
                 }
             }
-            return await message.reply("автомат (сумма)\n\nПример: Автомат 100к", replyParams());
+            return await message.reply("❌ автомат [ставка]\n\nПример: автомат 100к", replyParams());
         }
 
         if (cleanText.startsWith('блэкджек')) {
             if (parts.length >= 2) {
                 let bet = parseAmount(parts[1]) === 'ALL' ? balance : parseAmount(parts[1]);
-                if (isNaN(bet) || bet < 10 || bet > balance) return await message.reply(`❌ Мин. ставка 10, у тебя ${formatMoney(balance)}$`, replyParams());
+                if (isNaN(bet) || bet < 10) return await message.reply("❌ Минимальная ставка 10$.", replyParams());
+                if (bet > balance) return await message.reply(`❌ Недостаточно средств! Ваш баланс: ${formatMoney(balance)}$.`, replyParams());
                 
                 await updateBalance(userId, -bet);
-                // Упрощенный блэкджек
-                const playerScore = Math.floor(Math.random() * 10) + 12; // 12-21
-                const dealerScore = Math.floor(Math.random() * 10) + 12; // 12-21
+                const playerScore = Math.floor(Math.random() * 10) + 12; 
+                const dealerScore = Math.floor(Math.random() * 10) + 12; 
                 
-                let msgText = `🃏 **Блэкджек**\n\n👤 Твои очки: ${playerScore}\n🤵 Очки дилера: ${dealerScore}\n\n`;
+                let msgText = `🃏 Блэкджек\n\n👤 Твои очки: ${playerScore}\n🤵 Очки дилера: ${dealerScore}\n\n`;
                 
                 if (playerScore > 21) {
                     msgText += `❌ Перебор! Вы проиграли ${formatMoney(bet)}$`;
@@ -815,16 +847,22 @@ vk.updates.on('message_new', async (message) => {
                 msgText += `\n💰 Баланс: ${formatMoney(await getBalance(userId))}$`;
                 return await message.reply(msgText, replyParams());
             }
-            return await message.reply("❌ Блэкджек (ставка)\n\nПример: Блэкджек 100к", replyParams());
+            return await message.reply("❌ блэкджек [ставка]\n\nПример: блэкджек 100к", replyParams());
         }
 
         if (cleanText.startsWith('дрим')) {
             if (parts.length >= 3) {
-                const guess = parseInt(parts[1]);
-                let bet = parseAmount(parts[2]) === 'ALL' ? balance : parseAmount(parts[2]);
-                if (isNaN(bet) || bet < 10 || bet > balance) return await message.reply(`❌ Мин. ставка 10, у тебя ${formatMoney(balance)}$`, replyParams());
-                const validNumbers = {1: 2, 2: 2, 3: 3, 5: 5, 10: 10};
-                if (!validNumbers[guess]) return await message.reply("❌ Доступные числа: 1, 2, 3, 5, 10", replyParams());
+                let guess = 0;
+                let betStr = "";
+                const validDream = [1, 2, 3, 5, 10];
+                const p1 = parseInt(parts[1]), p2 = parseInt(parts[2]);
+                if (validDream.includes(p1)) { guess = p1; betStr = parts[2]; }
+                else if (validDream.includes(p2)) { guess = p2; betStr = parts[1]; }
+                else return await message.reply("❌ Доступные числа: 1, 2, 3, 5, 10", replyParams());
+
+                let bet = parseAmount(betStr) === 'ALL' ? balance : parseAmount(betStr);
+                if (isNaN(bet) || bet < 10) return await message.reply("❌ Минимальная ставка 10$.", replyParams());
+                if (bet > balance) return await message.reply(`❌ Недостаточно средств! Ваш баланс: ${formatMoney(balance)}$.`, replyParams());
                 
                 await updateBalance(userId, -bet);
                 const res = Math.floor(Math.random() * 10) + 1;
@@ -836,7 +874,7 @@ vk.updates.on('message_new', async (message) => {
                     return await message.reply(`💎 Выпало число: ${res}\n\n❌ Вы проиграли ${formatMoney(bet)}$\n💰 Баланс: ${formatMoney(await getBalance(userId))}$`, replyParams());
                 }
             }
-            return await message.reply("Дрим [число] [ставка]\n-Доступны числа:\n🔹 1 (x2)\n🔹 2 (x2)\n🔹 3 (x3)\n🔹 5 (x5)\n🔹 10 (x10)\n\n🤔 Пример: Дрим 10 5мм\n\n❓ Чтобы поставить весь баланс вместо ставки нужно написать: Вб", replyParams());
+            return await message.reply("❌ дрим [1/2/3/5/10] [ставка]\n\nПример: дрим 10 5мм", replyParams());
         }
 
         if (cleanText.includes('рулетка') || cleanText.startsWith('рул')) {
@@ -846,7 +884,8 @@ vk.updates.on('message_new', async (message) => {
                 let parsedBet = parseAmount(betStr);
                 let bet = parsedBet === 'ALL' ? balance : parsedBet;
 
-                if (isNaN(bet) || bet < 10 || bet > balance) return await message.reply(`❌ Мин. ставка 10, у тебя ${formatMoney(balance)}$`, replyParams());
+                if (isNaN(bet) || bet < 10) return await message.reply("❌ Минимальная ставка 10$.", replyParams());
+                if (bet > balance) return await message.reply(`❌ Недостаточно средств! Ваш баланс: ${formatMoney(balance)}$.`, replyParams());
 
                 const res = Math.floor(Math.random() * 37);
                 const redNumbers = [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36];
@@ -869,7 +908,7 @@ vk.updates.on('message_new', async (message) => {
                     return await message.reply(`🎰 Выпало: ${res} ${cEmoji} (${cName}, ${eName})\n\n😔 Проигрыш: -${bet}$\n💰 Баланс: ${formatMoney(await getBalance(userId))}$`, replyParams(isLs ? mainKb : undefined));
                 }
             } else {
-                return await message.reply("❌ Формат: /рулетка красное 500", replyParams());
+                return await message.reply("❌ Формат: рулетка [красное/черное/чет/нечет] [ставка]", replyParams());
             }
         }
 
@@ -901,7 +940,8 @@ vk.updates.on('message_new', async (message) => {
                 else if (parsed > 0) bet = parsed;
             }
 
-            if (bet < 10 || bet > balance) return await message.reply(`❌ Мин. ставка 10, у тебя ${formatMoney(balance)}$`, replyParams());
+            if (isNaN(bet) || bet < 10) return await message.reply("❌ Минимальная ставка 10$.", replyParams());
+            if (bet > balance) return await message.reply(`❌ Недостаточно средств! Ваш баланс: ${formatMoney(balance)}$.`, replyParams());
 
             const gameId = String(Math.floor(Math.random() * 90000) + 10000);
             await dbRun("INSERT INTO games (game_id, user_id, bet, mines, opened, multiplier, msg_id, start_time) VALUES (?, ?, ?, '[]', '[]', 1.0, ?, 0)", [gameId, String(userId), bet, String(message.id)]);
@@ -926,7 +966,7 @@ vk.updates.on('message_new', async (message) => {
                 const targetName = await getFullName(targetId);
                 return await message.reply(`💸 Ты успешно перевел ${formatMoney(amount)}$ игроку ${targetName}.\n💰 Твой баланс: ${formatMoney(await getBalance(userId))}$`, replyParams());
             } else {
-                return await message.reply("❌ Формат: /transfer [сумма] (ответом на сообщение)", replyParams());
+                return await message.reply("❌ Формат: transfer [сумма] (ответом на сообщение)", replyParams());
             }
         }
 
@@ -942,7 +982,7 @@ vk.updates.on('message_new', async (message) => {
 
                 return await message.reply(`⚔️ Дуэль!\n👤 Создатель: ${await getFullName(userId)}\n💰 Ставка: ${bet}$\n\n⚡ Нажми кнопку ниже!`, replyParams(getDuelKb(duelId)));
             } else {
-                return await message.reply("❌ Формат: /duel [сумма]", replyParams());
+                return await message.reply("❌ Формат: duel [сумма]", replyParams());
             }
         }
 
@@ -1017,7 +1057,6 @@ vk.updates.on('message_new', async (message) => {
                 return await message.reply(`${senderName} разбанил(-а) пользователя ${targetName} в ЧС бота.`, replyParams());
             }
 
-            // --- КОМАНДА ВЫДАТЬ ---
             if (cleanText.startsWith('выдать')) {
                 const args = message.text.split(' ');
                 args.shift(); 
@@ -1073,7 +1112,6 @@ vk.updates.on('message_new', async (message) => {
                 }
             }
 
-            // --- КОМАНДА ОБНУЛИТЬ ---
             if (cleanText.startsWith('обнулить')) {
                 const args = message.text.split(' ');
                 args.shift(); 
@@ -1185,7 +1223,6 @@ vk.updates.on('message_event', async (context) => {
         const payload = context.eventPayload;
         const userId = context.userId;
 
-        // 1. ПРОВЕРКА АВТОРА
         if ((payload.cmd === 'top_menu' || payload.cmd === 'top_back' || payload.cmd === 'biz_upgrade') && payload.author) {
             if (String(userId) !== String(payload.author)) {
                 return await safeAnswer({
@@ -1195,19 +1232,18 @@ vk.updates.on('message_event', async (context) => {
             }
         }
 
-        // ОТПРАВКА ИНСТРУКЦИЙ КАЗИНО В ЧАТ
         if (payload.cmd === 'casino_info') {
             let msg = "";
             if (payload.game === 'roulette') msg = "Как играть в рулетку ❓\n\"Рулетка [на что ставишь] [ставка]\"\n▪ Число от 0 до 36 (x36)\n▪ Чет (x2)\n▪ Нечет (x2)\n▪ Красное (x2)\n▪ Черное (x2)\n▪ 1-12 (x3)\n▪ 13-24 (x3)\n▪ 25-36 (x3)\n▪ 1-18 (x2)\n▪ 19-36 (x2)\n▪ Ряд1\n▪ Ряд2\n▪ Ряд3\n\n⚠️ Чтобы поставить весь баланс, там где ставка пиши \"вб\"\n\nПример — \"Рулетка чет 1кк\"";
-            if (payload.game === 'crash') msg = "❌ краш (автостоп) (ставка)\n\nПример: Краш 3 вб";
-            if (payload.game === 'coin') msg = "❌ монетка (ставка) (орел/решка)\n\nПример: Монетка 100к орел";
-            if (payload.game === 'glass') msg = "❌ стакан (ставка) (1-3)\n\nПример: Стакан 10к 2";
-            if (payload.game === 'dice') msg = "❌ кубик (ставка) (1-6)\n\nПример: Кубик 10к 4";
-            if (payload.game === 'slot') msg = "автомат (сумма)\n\nПример: Автомат 100к";
-            if (payload.game === 'blackjack') msg = "❌ Блэкджек (ставка)\n\nПример: Блэкджек 100к";
-            if (payload.game === 'dream') msg = "Дрим [число] [ставка]\n-Доступны числа:\n🔹 1 (x2)\n🔹 2 (x2)\n🔹 3 (x3)\n🔹 5 (x5)\n🔹 10 (x10)\n\n🤔 Пример: Дрим 10 5мм\n\n❓ Чтобы поставить весь баланс вместо ставки нужно написать: Вб";
+            if (payload.game === 'crash') msg = "❌ краш (автостоп) (ставка)\n\nПример: краш 3 вб";
+            if (payload.game === 'coin') msg = "❌ монетка [орел/решка] [ставка]\n\nПример: монетка орел 100к";
+            if (payload.game === 'glass') msg = "❌ стакан [1-3] [ставка]\n\nПример: стакан 2 10к";
+            if (payload.game === 'dice') msg = "❌ кубик [1-6] [ставка]\n\nПример: кубик 4 10к";
+            if (payload.game === 'slot') msg = "автомат (сумма)\n\nПример: автомат 100к";
+            if (payload.game === 'blackjack') msg = "❌ Блэкджек (ставка)\n\nПример: блэкджек 100к";
+            if (payload.game === 'dream') msg = "Дрим [число] [ставка]\n-Доступны числа:\n🔹 1 (x2)\n🔹 2 (x2)\n🔹 3 (x3)\n🔹 5 (x5)\n🔹 10 (x10)\n\n🤔 Пример: дрим 10 5мм\n\n❓ Чтобы поставить весь баланс вместо ставки нужно написать: Вб";
             
-            await safeAnswer(); // Убираем загрузку
+            await safeAnswer(); 
             await vk.api.messages.send({
                 peer_id: context.peerId,
                 message: msg,
@@ -1217,7 +1253,6 @@ vk.updates.on('message_event', async (context) => {
             return;
         }
 
-        // 2. ОБРАБОТКА БИЗНЕСА
         if (payload.cmd === 'biz_upgrade') {
             const biz = await dbGet("SELECT * FROM businesses WHERE user_id = ?", [String(userId)]);
             if (!biz) {
@@ -1254,7 +1289,6 @@ vk.updates.on('message_event', async (context) => {
             return;
         }
 
-        // 3. ОБРАБОТКА РАБОТЫ
         if (payload.cmd === 'work_do') {
             const now = Date.now();
             const workRow = await dbGet("SELECT count, last_reset FROM work_cd WHERE user_id = ?", [String(userId)]);
@@ -1307,7 +1341,6 @@ vk.updates.on('message_event', async (context) => {
             return;
         }
 
-        // 4. ДЛЯ ОСТАЛЬНЫХ КНОПОК
         await safeAnswer();
 
         if (payload.cmd === 'work_menu') {
@@ -1534,7 +1567,6 @@ vk.updates.on('message_event', async (context) => {
             }
         }
 
-        // --- ИГРА МИНЫ ---
         if (payload.cmd === 'mines_set') {
             const gameId = String(payload.gameId);
             const count = Number(payload.count);
@@ -1690,7 +1722,7 @@ vk.updates.on('message_event', async (context) => {
                 if (!row) return;
 
                 const opened = JSON.parse(row.opened);
-                if (opened.length === 0) return; // Защита от бага
+                if (opened.length === 0) return; 
 
                 const winAmount = Math.floor(row.bet * row.multiplier);
                 await updateBalance(userId, winAmount);
