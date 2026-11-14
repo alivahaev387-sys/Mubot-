@@ -237,9 +237,10 @@ vk.updates.on('message_new', async (message) => {
 
                 if (spamData.isMuted && now < spamData.muteEndTime) {
                     try { 
-                        await vk.api.messages.delete({ message_ids: [message.id], delete_for_all: 1 }); 
+                        // Правильное удаление для беседы: peer_id, cmids, group_id
+                        await vk.api.messages.delete({ peer_id: peerId, cmids: [message.conversationMessageId], delete_for_all: 1, group_id: GROUP_ID }); 
                     } catch (e) { 
-                        // Если ВК запретил удалять (ошибка 15), просто игнорируем
+                        // Если ВК запретил удалять, молчим
                     }
                     return;
                 } else if (spamData.isMuted && now >= spamData.muteEndTime) {
@@ -255,7 +256,7 @@ vk.updates.on('message_new', async (message) => {
                         await vk.api.messages.changeConversationMemberRestrictions({ group_id: GROUP_ID, peer_id: peerId, member_id: userId, action: 'ro', for: muteMin * 60 });
                         await message.reply(`🚫 [id${userId}|Игрок] получил блокировку чата на ${muteMin} минут за нарушение антиспама.`);
                         spamData.count = 0; spamCache.set(cacheKey, spamData);
-                        try { await vk.api.messages.delete({ message_ids: [message.id], delete_for_all: 1 }); } catch(e) {}
+                        try { await vk.api.messages.delete({ peer_id: peerId, cmids: [message.conversationMessageId], delete_for_all: 1, group_id: GROUP_ID }); } catch(e) {}
                     } catch(e) {
                         console.error("Не удалось выдать мут:", e.message);
                         spamData.isMuted = false; spamCache.set(cacheKey, spamData);
@@ -575,7 +576,7 @@ vk.updates.on('message_new', async (message) => {
                 const { targetId } = await getTargetAndReason(message, 'unmute');
                 if (!targetId) return await message.reply("⚠️ Укажите пользователя (ответом или @упоминанием).", replyParams());
                 try {
-                    // Снимаем мут с помощью action: 'rw' и без параметра 'for'
+                    // Снимаем мут без параметра 'for'
                     await vk.api.messages.changeConversationMemberRestrictions({ group_id: GROUP_ID, peer_id: peerId, member_id: targetId, action: 'rw' });
                     const cacheKey = `${peerId}_${targetId}`; spamCache.delete(cacheKey);
                     return await message.reply(`✅ Вы успешно сняли мут с игрока ${await getFullName(targetId)}!`, replyParams());
