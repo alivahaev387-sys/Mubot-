@@ -235,7 +235,7 @@ function buildMinesKb(gameId, opened, mines = [], isGameOver = false, hitCell = 
             if (opened.includes(i)) {
                 kb.callbackButton({ label: '✅', payload: { cmd: 'none' }, color: Keyboard.POSITIVE_COLOR });
             } else {
-                kb.callbackButton({ label: '❓', payload: { cmd: 'mines_click', gameId: String(gameId), cell: String(i) }, color: Keyboard.NEGATIVE_COLOR });
+                kb.callbackButton({ label: '❓', payload: { cmd: 'mines_click', gameId: String(gameId), cell: String(i) }, color: Keyboard.SECONDARY_COLOR });
             }
         }
         if (i % 3 === 0) kb.row();
@@ -246,7 +246,6 @@ function buildMinesKb(gameId, opened, mines = [], isGameOver = false, hitCell = 
     }
     return kb.toString();
 }
-
 
 // ===== КЛАВИАТУРЫ =====
 const mainKb = Keyboard.builder()
@@ -944,13 +943,13 @@ vk.updates.on('message_event', async (context) => {
         const payload = context.eventPayload;
         const userId = context.userId;
         
-        // === СНАЧАЛА ОТВЕЧАЕМ НА КНОПКУ (чтобы не было ошибки invalid event_id) ===
-        await context.answer();
+        // Мы убрали context.answer() отсюда, чтобы не было двойного ответа (invalid event_id).
 
         if (payload.cmd === 'work_menu') {
             await context.editMessage({ message: "💼 Выберите работу:", keyboard: getWorkKb() });
-            return;
+            return await context.answer();
         }
+        
         if (payload.cmd === 'work_do') {
             const now = Date.now();
             const workRow = await dbGet("SELECT count, last_reset FROM work_cd WHERE user_id = ?", [String(userId)]);
@@ -971,7 +970,7 @@ vk.updates.on('message_event', async (context) => {
                 const remaining = 3600000 - (now - lastReset);
                 const m = Math.floor(remaining / 60000);
                 const s = Math.floor((remaining % 60000) / 1000);
-                return await vk.api.messages.sendMessageEventAnswer({ event_id: context.eventId, user_id: userId, peer_id: context.peerId, event_data: JSON.stringify({ type: 'show_snackbar', text: `⏳ Вы отработали 3 раза. Ждите ${m} мин. ${s} сек.` }) });
+                return await context.answer({ type: 'show_snackbar', text: `⏳ Вы отработали 3 раза. Ждите ${m} мин. ${s} сек.` });
             }
 
             count++;
@@ -995,7 +994,7 @@ vk.updates.on('message_event', async (context) => {
                 message: `${msgText}\n\n💰 Ваш баланс: ${formatMoney(newBal)}$\n📊 Осталось попыток: ${3 - count}/3`, 
                 keyboard: getWorkKb() 
             });
-            return;
+            return await context.answer();
         }
 
         if (payload.cmd === 'activate_bot' || payload.cmd === 'decline_bot') {
@@ -1017,7 +1016,7 @@ vk.updates.on('message_event', async (context) => {
                 } else {
                     await context.editMessage({ message: "❌ Активация отменена. Чтобы начать работу, добавьте бота заново.", disable_mentions: 1 });
                 }
-                return;
+                return await context.answer();
             } catch (e) {
                 return await context.answer({ type: 'show_snackbar', text: '❌ Ошибка при проверке прав.' });
             }
@@ -1047,7 +1046,7 @@ vk.updates.on('message_event', async (context) => {
             try {
                 await context.editMessage({ message: newMsgText, keyboard: getBizKb(userId), disable_mentions: 1 });
             } catch(e) {}
-            return;
+            return await context.answer();
         }
 
         if (payload.cmd === 'top_menu') {
@@ -1092,7 +1091,10 @@ vk.updates.on('message_event', async (context) => {
                 }
             }
 
-            if (rows.length === 0) return await context.answer({ type: 'show_snackbar', text: '❌ Топ пуст.' });
+            if (rows.length === 0) {
+                await context.editMessage({ message: "❌ Топ пуст.", keyboard: getTopKb(payload.author, type, scope, repType) });
+                return await context.answer();
+            }
 
             const userIds = rows.map(r => r.user_id);
             let usersInfo = [];
@@ -1125,13 +1127,11 @@ vk.updates.on('message_event', async (context) => {
             }
 
             await context.editMessage({
-                peer_id: context.peerId,
-                conversation_message_id: context.conversationMessageId,
                 message: topText,
                 keyboard: getTopKb(payload.author, type, scope, repType),
                 disable_mentions: 1
             });
-            return;
+            return await context.answer();
         }
 
         if (payload.cmd === 'top_back') {
@@ -1158,13 +1158,11 @@ vk.updates.on('message_event', async (context) => {
             }
 
             await context.editMessage({
-                peer_id: context.peerId,
-                conversation_message_id: context.conversationMessageId,
                 message: topText,
                 keyboard: getTopKb(payload.author, 'coins', 'chat'),
                 disable_mentions: 1
             });
-            return;
+            return await context.answer();
         }
 
         if (payload.cmd === 'duel_accept') {
@@ -1190,8 +1188,6 @@ vk.updates.on('message_event', async (context) => {
                 const msgText = `⚔️ Дуэль завершена!\n\n🏆 Победитель: ${winnerName}\n❌ Проигравший: ${loserName}\n\n💰 Выигрыш: ${prize}$`;
                 
                 await context.editMessage({
-                    peer_id: context.peerId,
-                    conversation_message_id: context.conversationMessageId,
                     message: msgText,
                     keyboard: "",
                     disable_mentions: 1
@@ -1225,12 +1221,10 @@ vk.updates.on('message_event', async (context) => {
                 const ui = getMinesGameUI(row.bet, count, [], false, null, name, await getBalance(userId), 60);
                 
                 await context.editMessage({
-                    peer_id: context.peerId,
-                    conversation_message_id: context.conversationMessageId,
                     message: ui.text,
                     keyboard: ui.kb
                 });
-                return;
+                return await context.answer();
             } catch(e) {
                 return await context.answer({ type: 'show_snackbar', text: '❌ Ошибка при создании игры.' });
             }
@@ -1259,8 +1253,6 @@ vk.updates.on('message_event', async (context) => {
                     let text = ui.text.replace('наступил(а) на мину!', 'не успел(а) открыть клетку!');
                     
                     await context.editMessage({
-                        peer_id: context.peerId,
-                        conversation_message_id: context.conversationMessageId,
                         message: text,
                         keyboard: ui.kb
                     });
@@ -1308,8 +1300,6 @@ vk.updates.on('message_event', async (context) => {
                     }
                     
                     await context.editMessage({
-                        peer_id: context.peerId,
-                        conversation_message_id: context.conversationMessageId,
                         message: text,
                         keyboard: ui.kb
                     });
@@ -1320,8 +1310,6 @@ vk.updates.on('message_event', async (context) => {
                     let text = ui.text.replace('{TIME}', timeLeft.toString());
                     
                     await context.editMessage({
-                        peer_id: context.peerId,
-                        conversation_message_id: context.conversationMessageId,
                         message: text,
                         keyboard: ui.kb
                     });
@@ -1350,8 +1338,6 @@ vk.updates.on('message_event', async (context) => {
                 const msgText = `💰 **ВЫВОД**\n────────────────────\n👤 ${await getFullName(userId)}\n💵 Забрал: ${winAmount} 💰 (x${row.multiplier})\n💳 Баланс: ${formatMoney(balance)} 💰\n\n💬 Отличная игра! Заходи ещё 🍀`;
                 
                 await context.editMessage({
-                    peer_id: context.peerId,
-                    conversation_message_id: context.conversationMessageId,
                     message: msgText,
                     keyboard: buildMinesKb(gameId, opened, mines, true, null)
                 });
