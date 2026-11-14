@@ -172,7 +172,7 @@ async function getTargetAndReason(message, cmdName) {
 }
 
 // ===== ГЕНЕРАТОР ТЕКСТА И КЛАВИАТУРЫ ДЛЯ МИН =====
-function getMinesGameUI(bet, minesCount, opened, isLoss = false, hitCell = null, name = "", balance = 0) {
+function getMinesGameUI(bet, minesCount, opened, isLoss = false, hitCell = null, name = "", balance = 0, timeLeft = 60) {
     const totalSafe = 9 - minesCount;
     const currentOpened = opened.length;
 
@@ -199,7 +199,7 @@ function getMinesGameUI(bet, minesCount, opened, isLoss = false, hitCell = null,
         const lostMoney = currentMoney;
         return {
             text: `💥 **БАБАХ! ПОРАЖЕНИЕ**\n────────────────────\n👤 ${name} наступил(а) на мину!\n💣 Мин на поле: ${minesCount}\n✅ Успел(а) открыть: ${currentOpened}\n\n📉 Потеряно: -${bet} 💰\n😢 Не забрал(а): ${lostMoney} 💰 (x${currentMult})\n💳 Баланс: ${formatMoney(balance)} 💰\n\n💬 Бывает. Следующая будет твоей 🍀`,
-            kb: buildMinesKb(null, opened, [], true, hitCell)
+            kb: buildMinesKb(null, opened, mines, true, hitCell)
         };
     } else {
         const randomPhrases = [
@@ -212,8 +212,8 @@ function getMinesGameUI(bet, minesCount, opened, isLoss = false, hitCell = null,
         const phrase = currentOpened === 0 ? randomPhrases[0] : randomPhrases[Math.floor(Math.random() * (randomPhrases.length - 1)) + 1];
 
         return {
-            text: `💣 **МИНЫ**\n────────────────────\n👤 ${name}\n💵 Ставка: ${bet} | 💣 Мин: ${minesCount}\n\n${progressBar} ${currentOpened}/${totalSafe}\n📈 Сейчас: x${currentMult.toFixed(2)} → ${currentMoney} 💰\n🎯 Следующая: x${nextMult.toFixed(2)} → ${nextMoney} 💰\n🍀 Шанс безопасной клетки: ${chance}%\n⏱ Осталось: {TIME} сек.\n\n💬 ${phrase}`,
-            kb: buildMinesKb(null, opened, [], false, null, currentMoney)
+            text: `💣 **МИНЫ**\n────────────────────\n👤 ${name}\n💵 Ставка: ${bet} | 💣 Мин: ${minesCount}\n\n${progressBar} ${currentOpened}/${totalSafe}\n📈 Сейчас: x${currentMult.toFixed(2)} → ${currentMoney} 💰\n🎯 Следующая: x${nextMult.toFixed(2)} → ${nextMoney} 💰\n🍀 Шанс безопасной клетки: ${chance}%\n⏱ Осталось: ${timeLeft} сек.\n\n💬 ${phrase}`,
+            kb: buildMinesKb(null, opened, mines, false, null, currentMoney)
         };
     }
 }
@@ -944,10 +944,10 @@ vk.updates.on('message_event', async (context) => {
         const payload = context.eventPayload;
         const userId = context.userId;
         
-        // === ВАЖНО: НЕ ОТВЕЧАЕМ СРАЗУ. Отвечаем ТОЛЬКО в конце действия ===
+        // === СНАЧАЛА ОТВЕЧАЕМ НА КНОПКУ (чтобы не было ошибки invalid event_id) ===
+        await context.answer();
 
         if (payload.cmd === 'work_menu') {
-            await context.answer();
             await context.editMessage({ message: "💼 Выберите работу:", keyboard: getWorkKb() });
             return;
         }
@@ -971,7 +971,7 @@ vk.updates.on('message_event', async (context) => {
                 const remaining = 3600000 - (now - lastReset);
                 const m = Math.floor(remaining / 60000);
                 const s = Math.floor((remaining % 60000) / 1000);
-                return await context.answer({ type: 'show_snackbar', text: `⏳ Вы отработали 3 раза. Ждите ${m} мин. ${s} сек.` });
+                return await vk.api.messages.sendMessageEventAnswer({ event_id: context.eventId, user_id: userId, peer_id: context.peerId, event_data: JSON.stringify({ type: 'show_snackbar', text: `⏳ Вы отработали 3 раза. Ждите ${m} мин. ${s} сек.` }) });
             }
 
             count++;
@@ -995,7 +995,7 @@ vk.updates.on('message_event', async (context) => {
                 message: `${msgText}\n\n💰 Ваш баланс: ${formatMoney(newBal)}$\n📊 Осталось попыток: ${3 - count}/3`, 
                 keyboard: getWorkKb() 
             });
-            return await context.answer(); // Отвечаем в конце
+            return;
         }
 
         if (payload.cmd === 'activate_bot' || payload.cmd === 'decline_bot') {
@@ -1017,7 +1017,7 @@ vk.updates.on('message_event', async (context) => {
                 } else {
                     await context.editMessage({ message: "❌ Активация отменена. Чтобы начать работу, добавьте бота заново.", disable_mentions: 1 });
                 }
-                return await context.answer();
+                return;
             } catch (e) {
                 return await context.answer({ type: 'show_snackbar', text: '❌ Ошибка при проверке прав.' });
             }
@@ -1047,7 +1047,7 @@ vk.updates.on('message_event', async (context) => {
             try {
                 await context.editMessage({ message: newMsgText, keyboard: getBizKb(userId), disable_mentions: 1 });
             } catch(e) {}
-            return await context.answer();
+            return;
         }
 
         if (payload.cmd === 'top_menu') {
@@ -1131,7 +1131,7 @@ vk.updates.on('message_event', async (context) => {
                 keyboard: getTopKb(payload.author, type, scope, repType),
                 disable_mentions: 1
             });
-            return await context.answer();
+            return;
         }
 
         if (payload.cmd === 'top_back') {
@@ -1164,7 +1164,7 @@ vk.updates.on('message_event', async (context) => {
                 keyboard: getTopKb(payload.author, 'coins', 'chat'),
                 disable_mentions: 1
             });
-            return await context.answer();
+            return;
         }
 
         if (payload.cmd === 'duel_accept') {
@@ -1222,16 +1222,15 @@ vk.updates.on('message_event', async (context) => {
                 await dbRun("UPDATE games SET mines = ?, opened = '[]', multiplier = 1.0, start_time = ? WHERE game_id = ?", [minesStr, now, gameId]);
                 
                 const name = await getFullName(userId);
-                const ui = getMinesGameUI(row.bet, count, [], false, null, name, await getBalance(userId));
-                let text = ui.text.replace('{TIME}', '60');
+                const ui = getMinesGameUI(row.bet, count, [], false, null, name, await getBalance(userId), 60);
                 
                 await context.editMessage({
                     peer_id: context.peerId,
                     conversation_message_id: context.conversationMessageId,
-                    message: text,
+                    message: ui.text,
                     keyboard: ui.kb
                 });
-                return await context.answer();
+                return;
             } catch(e) {
                 return await context.answer({ type: 'show_snackbar', text: '❌ Ошибка при создании игры.' });
             }
